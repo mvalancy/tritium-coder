@@ -16,12 +16,13 @@ source "$SCRIPT_DIR/.lib/common.sh"
 # --- Quantization selection ---
 # GB10 has ~119GB usable. Quant must leave room for KV cache + OS.
 #
-#   Q2_K_L      ~ 83 GB   (recommended - good headroom)
-#   UD-IQ3_XXS  ~ 93 GB   (better quality, tighter fit)
-#   UD-Q3_K_XL  ~101 GB   (best quality, very tight)
-#   UD-IQ2_M    ~ 78 GB   (most headroom, lower quality)
+#   UD-TQ1_0    ~ 56 GB   (recommended - most headroom, proven stable)
+#   UD-IQ1_M    ~ 68 GB   (better quality, good headroom)
+#   UD-IQ2_M    ~ 78 GB   (good quality, moderate headroom)
+#   Q2_K_L      ~ 83 GB   (higher quality, tight on 128GB)
+#   UD-IQ3_XXS  ~ 93 GB   (best quality, very tight on 128GB)
 #
-QUANT="${QUANT:-Q2_K_L}"
+QUANT="${QUANT:-UD-TQ1_0}"
 
 banner
 
@@ -191,6 +192,54 @@ PYEOF
     GGUF_SIZE=$(du -sh "$GGUF_PARENT" 2>/dev/null | cut -f1)
     PART_COUNT=$(find "$GGUF_PARENT" -name "*.gguf" 2>/dev/null | wc -l)
     log_ok "Download complete ${DIM}(${GGUF_SIZE}, ${PART_COUNT} part(s))${RST}"
+fi
+
+# --- Merge split GGUFs if needed (Ollama doesn't support split files yet) ---
+PART_COUNT=$(find "$(dirname "$GGUF_FILE")" -name "*.gguf" 2>/dev/null | wc -l)
+if [ "$PART_COUNT" -gt 1 ] && echo "$GGUF_FILE" | grep -q "00001-of-"; then
+    MERGED_NAME="MiniMax-M2.5-${QUANT}.gguf"
+    MERGED_PATH="$MODEL_DIR/MiniMax-M2.5-GGUF/$MERGED_NAME"
+    if [ -f "$MERGED_PATH" ]; then
+        log_ok "Merged GGUF already exists ${DIM}($(du -sh "$MERGED_PATH" | cut -f1))${RST}"
+        GGUF_FILE="$MERGED_PATH"
+    else
+        log_run "Split GGUF detected (${PART_COUNT} parts). Merging for Ollama..."
+        log_info "Ollama doesn't support split GGUFs yet. Building merge tool..."
+
+        # Build llama-gguf-split if not available
+        if [ ! -f "/tmp/llama-cpp-build/build/bin/llama-gguf-split" ]; then
+            log_run "Compiling llama-gguf-split from llama.cpp..."
+            (
+                cd /tmp
+                [ ! -d llama-cpp-build ] && git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama-cpp-build
+                cd llama-cpp-build
+                cmake -B build -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+                    -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF > /dev/null 2>&1
+                cmake --build build --target llama-gguf-split -j$(nproc) > /dev/null 2>&1
+            )
+            if [ -f "/tmp/llama-cpp-build/build/bin/llama-gguf-split" ]; then
+                log_ok "Merge tool built"
+            else
+                log_fail "Could not build llama-gguf-split. Install cmake and g++ first."
+                exit 1
+            fi
+        fi
+
+        log_run "Merging ${PART_COUNT} parts into single file (this may take several minutes)..."
+        /tmp/llama-cpp-build/build/bin/llama-gguf-split --merge "$GGUF_FILE" "$MERGED_PATH" 2>&1 | \
+            while IFS= read -r line; do echo -e "         ${DIM}${line}${RST}"; done
+
+        if [ -f "$MERGED_PATH" ]; then
+            MERGED_SIZE=$(du -sh "$MERGED_PATH" | cut -f1)
+            log_ok "Merged successfully ${DIM}(${MERGED_SIZE})${RST}"
+            GGUF_FILE="$MERGED_PATH"
+        else
+            log_fail "Merge failed"
+            exit 1
+        fi
+    fi
+else
+    log_info "Single GGUF file, no merge needed"
 fi
 
 # =========================================================================

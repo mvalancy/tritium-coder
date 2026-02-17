@@ -59,7 +59,7 @@ cd tritium-coder
 That's it. The installer handles everything:
 
 1. Checks and installs system dependencies (Ollama, Python, Node.js, Git)
-2. Downloads the quantized model from HuggingFace (~83 GB for default Q2_K_L)
+2. Downloads the quantized model from HuggingFace (~56 GB for default UD-TQ1_0)
 3. Imports the model into Ollama
 4. Sets up the Claude Code translation proxy
 5. Installs and configures OpenClaw
@@ -98,20 +98,20 @@ That's it. The installer handles everything:
 
 ## Choosing a Quantization
 
-Pick a quantization that fits your RAM. The installer defaults to `Q2_K_L` which works well on 128 GB systems.
+Pick a quantization that fits your RAM. The installer defaults to `UD-TQ1_0` which is stable on 128 GB systems with plenty of headroom.
 
 ```bash
-QUANT=UD-IQ3_XXS ./install.sh   # Better quality, needs more RAM
-QUANT=UD-IQ2_M   ./install.sh   # Smaller footprint, lower quality
+QUANT=UD-IQ2_M   ./install.sh   # Better quality, needs more RAM
+QUANT=Q2_K_L     ./install.sh   # Higher quality, tight on 128 GB
 ```
 
 | Quantization | Download | RAM Needed | Quality | Best For |
 |-------------|----------|------------|---------|----------|
-| `UD-IQ2_M` | ~78 GB | ~96 GB | Good | 96 GB systems |
-| `Q2_K_L` | ~83 GB | ~100 GB | Better (default) | 128 GB systems |
-| `UD-IQ3_XXS` | ~93 GB | ~110 GB | Great | 128 GB+ with headroom |
-| `UD-Q3_K_XL` | ~101 GB | ~120 GB | Best | 128 GB+ (tight fit) |
-| `IQ4_XS` | ~122 GB | ~140 GB | Excellent | 192 GB+ systems |
+| `UD-TQ1_0` | ~56 GB | ~72 GB | Good (default) | 128 GB systems |
+| `UD-IQ1_M` | ~68 GB | ~84 GB | Better | 128 GB systems |
+| `UD-IQ2_M` | ~78 GB | ~96 GB | Great | 128 GB+ with headroom |
+| `Q2_K_L` | ~83 GB | ~100 GB | Higher | 128 GB+ (tighter fit) |
+| `UD-IQ3_XXS` | ~93 GB | ~110 GB | Best | 192 GB+ systems |
 
 ## File Structure
 
@@ -130,7 +130,7 @@ tritium-coder/
   config/
     Modelfile         # Ollama model definition (generated)
     openclaw.json     # OpenClaw local config (generated)
-  models/             # Downloaded model files (~83 GB)
+  models/             # Downloaded model files (~56 GB+)
   logs/               # Runtime logs
   .proxy/             # Claude Code proxy (auto-cloned)
 ```
