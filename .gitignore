@@ -1,0 +1,30 @@
+# Model files (too large for git)
+models/
+*.gguf
+
+# Proxy (auto-cloned during install)
+.proxy/
+
+# Runtime
+logs/
+*.log
+*.pid
+
+# Generated config
+config/Modelfile
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
