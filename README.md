@@ -12,11 +12,17 @@ Run a 229-billion parameter AI coding assistant on your own hardware. No cloud. 
 
 Tritium Coder turns a mini PC into a fully self-contained AI coding workstation. One script downloads a state-of-the-art open source model, wires it into professional coding tools, and gets out of your way.
 
-**Current stack:**
-- **Model:** [MiniMax-M2.5](https://huggingface.co/MiniMaxAI/MiniMax-M2.5) (229B MoE, quantized to fit your hardware)
-- **Serving:** [Ollama](https://ollama.com) (local model server)
-- **Coding interfaces:** [Claude Code](https://github.com/anthropics/claude-code) + [OpenClaw](https://github.com/openclaw/openclaw)
-- **Glue:** [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) (API translation layer)
+**Current default stack (every piece is swappable):**
+
+| Layer | Current Default | Swap With |
+|-------|----------------|-----------|
+| **Language Model** | [MiniMax-M2.5](https://huggingface.co/MiniMaxAI/MiniMax-M2.5) (229B MoE) | Any GGUF model on HuggingFace |
+| **Model Server** | [Ollama](https://ollama.com) | vLLM, SGLang, llama.cpp, LM Studio |
+| **Coding Agent** | [Claude Code](https://github.com/anthropics/claude-code) | Aider, Continue, Cursor, Cline |
+| **Agent Manager** | [OpenClaw](https://github.com/openclaw/openclaw) | Any OpenAI-compatible client |
+| **API Bridge** | [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) | LiteLLM, claude-adapter |
+
+Every component talks through standard APIs (OpenAI-compatible or Anthropic-compatible). Swap any layer without touching the others. When a better model drops, change one variable and re-run install.
 
 Everything runs offline after the initial setup download.
 
@@ -192,12 +198,27 @@ rm -rf ~/Code/tritium-coder     # or wherever you cloned it
 
 ## Project Philosophy
 
-The AI coding landscape moves fast. New models drop every month. New tools appear every week. Tritium Coder is designed to ride that wave:
+The AI coding landscape moves fast. New models drop every month. New tools appear every week. Tritium Coder is built to ride that wave without locking you into anything.
 
 - **One button:** Clone, run install, start coding. No YAML configs, no Docker compose, no dependency hell.
 - **Local first:** Your code stays on your machine. Period.
-- **Swappable:** When a better model drops, change one line and re-run install.
+- **Loosely coupled:** Every layer (model, server, agent, manager) communicates through standard APIs. Swap any piece without touching the rest. Nothing is precious.
+- **Model agnostic:** Today it's MiniMax-M2.5. Tomorrow it might be Qwen, DeepSeek, Llama, or something that doesn't exist yet. Change `QUANT` and the model name, re-run install.
+- **Tool agnostic:** Claude Code today, Aider tomorrow. OpenClaw now, something better next month. The architecture doesn't care.
 - **Affordable:** A $3,000 mini PC runs a 229B parameter model. That was unthinkable two years ago.
+
+### Swapping Components
+
+**Different model:**
+```bash
+# Edit install.sh: change the HuggingFace repo and model name
+# Then re-run:
+./install.sh
+```
+
+**Different coding agent:** Replace `run-claude.sh` with your agent's launch script. As long as it talks to an OpenAI-compatible endpoint, it works.
+
+**Different model server:** Point the proxy's `OPENAI_BASE_URL` at your server. Ollama, vLLM, SGLang, LM Studio -- they all speak OpenAI API.
 
 ## Credits
 
