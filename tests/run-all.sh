@@ -15,7 +15,7 @@ source "$PROJECT_DIR/scripts/lib/common.sh"
 
 TEST_OUTPUT_DIR="/tmp/tritium-tests"
 GATEWAY_PORT=18789
-AGENT_TIMEOUT=600  # 10 minutes per test
+AGENT_TIMEOUT=900  # 15 minutes per test (smash TV may use the full budget)
 
 # Colors for test results
 PASS="${BGRN}PASS${RST}"
@@ -271,40 +271,108 @@ Write the complete index.html file."
 test_smashtv() {
     local name="smashtv"
     local dir="$TEST_OUTPUT_DIR/$name"
-    section "Test: Smash TV Web Game"
+    section "Test: Smash TV Arena Shooter (Large Project)"
 
-    local prompt="Create a Smash TV-style twin-stick arena shooter in $dir/. Requirements:
-- Single file: index.html (all HTML, CSS, and JavaScript inline)
-- Top-down arena view with HTML5 Canvas
-- Player movement with WASD keys
-- Shooting direction follows mouse cursor, click or hold to fire
-- Waves of enemies that spawn from arena edges and chase the player
-- Enemies killed on contact with bullets, player takes damage on enemy contact
-- Power-ups that spawn randomly: health, spread shot, speed boost
-- HUD: health bar, score, wave number, kill count
-- Increasing difficulty each wave (more enemies, faster movement)
-- Retro arcade visual style with bright colors on dark background
-- Game over screen with final score
-- No external dependencies — pure HTML5 Canvas and vanilla JavaScript
-Write the complete index.html file."
+    local prompt="Build a complete Smash TV-style twin-stick arena shooter web game in $dir/.
 
-    log_run "Sending job to agent..."
+This is a LARGE multi-file project. Take your time and build it properly.
+
+FILE STRUCTURE:
+  $dir/index.html     - Main HTML entry point, loads all JS/CSS
+  $dir/css/style.css  - All game styling, HUD layout, menus
+  $dir/js/game.js     - Main game loop, state machine, initialization
+  $dir/js/player.js   - Player class: movement (WASD), health, lives, invincibility frames
+  $dir/js/enemies.js  - Enemy classes: Grunt (chases), Sniper (shoots), Tank (high HP), Boss
+  $dir/js/weapons.js  - Weapon system: pistol, shotgun (spread), laser (beam), rocket (AoE)
+  $dir/js/powerups.js - Power-up drops: health, weapon upgrade, speed boost, shield, nuke
+  $dir/js/waves.js    - Wave manager: spawn patterns, difficulty scaling, boss waves every 5
+  $dir/js/particles.js - Particle effects: explosions, bullet trails, damage numbers, sparks
+  $dir/js/hud.js      - HUD rendering: health bar, score, wave, kill count, weapon indicator, combo meter
+  $dir/js/audio.js    - Sound manager using Web Audio API: shoot, explode, pickup, damage, wave-start
+  $dir/js/input.js    - Input manager: WASD movement, mouse aim + fire, keyboard weapon switching (1-4)
+  $dir/js/collision.js - Collision detection: circle-circle, AABB, spatial hash grid for performance
+  $dir/js/utils.js    - Math helpers: vector ops, random ranges, lerp, distance, angle
+
+GAMEPLAY REQUIREMENTS:
+- Top-down arena view on HTML5 Canvas (960x640 or responsive)
+- WASD to move, mouse to aim, click/hold to fire
+- Weapons: start with pistol, pick up others. Each weapon has unique fire rate, damage, pattern.
+- 4 enemy types with distinct behaviors and visual designs
+- Boss enemy every 5 waves: large, high HP, attack patterns, drops best loot
+- Power-ups drop from killed enemies with weighted randomness
+- Combo system: kills within 2 seconds increase combo multiplier (score x combo)
+- Particle system for all visual feedback (at least 5 different particle types)
+- Procedural sound effects via Web Audio API oscillators (no audio files needed)
+- Game states: title screen, playing, paused (ESC), game over with stats
+- Difficulty scaling: enemy count, speed, HP all increase per wave
+- Score persisted to localStorage (high score table, top 5)
+- Retro arcade aesthetic: dark background, neon colors, screen shake on explosions, CRT scanline CSS effect
+
+Write ALL files listed above. Each file should be well-structured with classes and clear separation of concerns. This is a real game — make it fun and polished."
+
+    log_run "Sending job to agent (this is a large project, expect 5-15 minutes)..."
     run_agent_job "test-$name" "$prompt" "$dir"
 
     echo ""
     log_run "Validating output..."
     local ok=true
+
+    # Core files
     check_file_exists "$dir/index.html" "index.html exists" || ok=false
-    check_file_min_size "$dir/index.html" 5000 "index.html has substantial code (complex game)" || ok=false
-    check_file_contains "$dir/index.html" "<canvas\|canvas" "Uses canvas rendering" || ok=false
-    check_file_contains "$dir/index.html" "keydown\|keyCode\|addEventListener" "Has keyboard input" || ok=false
-    check_file_contains "$dir/index.html" "mouse\|Mouse\|click\|Click\|mousedown\|mousemove" "Has mouse input" || ok=false
-    check_file_contains "$dir/index.html" "enem\|Enem\|ENEM" "Has enemy logic" || ok=false
-    check_file_contains "$dir/index.html" "bullet\|Bullet\|BULLET\|projectile\|shoot" "Has bullet/shooting" || ok=false
-    check_file_contains "$dir/index.html" "score\|Score\|SCORE" "Has scoring" || ok=false
-    check_file_contains "$dir/index.html" "wave\|Wave\|WAVE\|level\|Level" "Has wave/level system" || ok=false
-    check_file_contains "$dir/index.html" "health\|Health\|HEALTH\|hp\|HP\|life\|damage" "Has health system" || ok=false
-    check_file_contains "$dir/index.html" "power.*up\|Power.*up\|powerup\|bonus\|pickup" "Has power-ups" || ok=false
+    check_file_min_size "$dir/index.html" 500 "index.html has content" || ok=false
+
+    # CSS
+    check_file_exists "$dir/css/style.css" "css/style.css exists" || ok=false
+
+    # JS modules
+    local js_files=("game" "player" "enemies" "weapons" "powerups" "waves" "particles" "hud" "audio" "input" "collision" "utils")
+    local js_found=0
+    for jsf in "${js_files[@]}"; do
+        if [ -f "$dir/js/${jsf}.js" ]; then
+            js_found=$((js_found + 1))
+            log_ok "js/${jsf}.js exists"
+        else
+            log_fail "js/${jsf}.js missing"
+            ok=false
+        fi
+    done
+    log_info "$js_found/${#js_files[@]} JS modules found"
+
+    # Content checks on key files
+    if [ -f "$dir/js/game.js" ]; then
+        check_file_min_size "$dir/js/game.js" 1000 "game.js has substantial code" || ok=false
+        check_file_contains "$dir/js/game.js" "requestAnimationFrame\|gameLoop\|update\|render" "game.js has game loop" || ok=false
+    fi
+    if [ -f "$dir/js/player.js" ]; then
+        check_file_contains "$dir/js/player.js" "WASD\|wasd\|KeyW\|KeyA\|KeyS\|KeyD\|move\|velocity" "player.js has WASD movement" || ok=false
+    fi
+    if [ -f "$dir/js/enemies.js" ]; then
+        check_file_contains "$dir/js/enemies.js" "Grunt\|grunt\|Sniper\|sniper\|Tank\|tank\|Boss\|boss\|enemy\|Enemy" "enemies.js has enemy types" || ok=false
+    fi
+    if [ -f "$dir/js/weapons.js" ]; then
+        check_file_contains "$dir/js/weapons.js" "pistol\|Pistol\|shotgun\|Shotgun\|laser\|Laser\|rocket\|Rocket\|weapon\|Weapon\|fire\|shoot" "weapons.js has weapon types" || ok=false
+    fi
+    if [ -f "$dir/js/particles.js" ]; then
+        check_file_contains "$dir/js/particles.js" "particle\|Particle\|emit\|Emit\|explosion\|Explosion\|effect" "particles.js has particle system" || ok=false
+    fi
+    if [ -f "$dir/js/waves.js" ]; then
+        check_file_contains "$dir/js/waves.js" "wave\|Wave\|spawn\|Spawn\|difficulty\|level" "waves.js has wave system" || ok=false
+    fi
+    if [ -f "$dir/js/audio.js" ]; then
+        check_file_contains "$dir/js/audio.js" "AudioContext\|audioContext\|oscillator\|Oscillator\|sound\|Sound\|play" "audio.js has Web Audio" || ok=false
+    fi
+
+    # Total project size check
+    if [ -d "$dir/js" ]; then
+        local total_js_size
+        total_js_size=$(du -sb "$dir/js/" 2>/dev/null | cut -f1)
+        if [ "$total_js_size" -ge 10000 ]; then
+            log_ok "JS codebase has substance (${total_js_size} bytes)"
+        else
+            log_fail "JS codebase too small (${total_js_size} bytes, expected >= 10KB)"
+            ok=false
+        fi
+    fi
 
     if [ "$ok" = true ]; then record_result "$name" "PASS"; else record_result "$name" "FAIL"; fi
 }
