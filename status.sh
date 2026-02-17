@@ -21,14 +21,14 @@ else
 fi
 
 # --- Model loaded ---
-LOADED=$(curl -s http://localhost:11434/api/ps 2>/dev/null | grep -o "\"$OLLAMA_MODEL_NAME\"" || echo "")
+LOADED=$(curl -s http://localhost:11434/api/ps 2>/dev/null | grep -o "\"$OLLAMA_MODEL_NAME" || echo "")
 if [ -n "$LOADED" ]; then
-    log_ok "MiniMax-M2.5        ${BGRN}loaded${RST}   ${DIM}${OLLAMA_MODEL_NAME}${RST}"
+    log_ok "Model               ${BGRN}loaded${RST}   ${DIM}${OLLAMA_MODEL_NAME}${RST}"
 else
     if ollama list 2>/dev/null | grep -q "$OLLAMA_MODEL_NAME"; then
-        log_warn "MiniMax-M2.5        ${YLW}available (not loaded)${RST}"
+        log_warn "Model               ${YLW}available (not loaded)${RST}  ${DIM}${OLLAMA_MODEL_NAME}${RST}"
     else
-        log_fail "MiniMax-M2.5        ${RED}not installed${RST}"
+        log_fail "Model               ${RED}not installed${RST}  ${DIM}${OLLAMA_MODEL_NAME}${RST}"
     fi
 fi
 
@@ -37,6 +37,15 @@ if ss -tlnp 2>/dev/null | grep -q ":${PROXY_PORT} "; then
     log_ok "Claude Code proxy   ${BGRN}running${RST}  ${DIM}http://localhost:${PROXY_PORT}${RST}"
 else
     log_fail "Claude Code proxy   ${RED}stopped${RST}"
+fi
+
+# --- OpenClaw Gateway ---
+GATEWAY_PORT=18789
+if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+    log_ok "OpenClaw gateway    ${BGRN}running${RST}  ${DIM}http://localhost:${GATEWAY_PORT}${RST}"
+    log_info "Dashboard           ${DIM}openclaw dashboard${RST}"
+else
+    log_fail "OpenClaw gateway    ${RED}stopped${RST}"
 fi
 
 section "System Resources"
@@ -69,22 +78,5 @@ for cmd_pair in "ollama:Ollama" "python3:Python" "node:Node.js" "claude:Claude C
         log_fail "${name}  ${RED}not found${RST}"
     fi
 done
-
-# Check huggingface_hub Python package
-HF_VER=$(python3 -c "import huggingface_hub; print(huggingface_hub.__version__)" 2>/dev/null)
-if [ -n "$HF_VER" ]; then
-    log_ok "huggingface_hub  ${DIM}v${HF_VER}${RST}"
-else
-    log_fail "huggingface_hub  ${RED}not installed${RST}"
-fi
-
-# Check GGUF model files
-GGUF_FILES=$(find "$MODEL_DIR" -name "*.gguf" 2>/dev/null | wc -l)
-if [ "$GGUF_FILES" -gt 0 ]; then
-    GGUF_SIZE=$(du -sh "$MODEL_DIR" 2>/dev/null | cut -f1)
-    log_ok "Model files  ${DIM}${GGUF_FILES} file(s), ${GGUF_SIZE}${RST}"
-else
-    log_fail "Model files  ${RED}not downloaded${RST}"
-fi
 
 echo ""

@@ -1,0 +1,69 @@
+{
+  "models": {
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "apiKey": "ollama-local",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "qwen3-coder-next",
+            "name": "Qwen3 Coder Next",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 65536,
+            "maxTokens": 32768
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": { "primary": "ollama/qwen3-coder-next" },
+      "compaction": { "mode": "safeguard" }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "tritium-local-dev"
+    }
+  },
+  "tools": {
+    "profile": "coding",
+    "web": {
+      "search": { "enabled": true },
+      "fetch": { "enabled": true }
+    },
+    "exec": {
+      "host": "gateway",
+      "security": "allowlist",
+      "applyPatch": {
+        "workspaceOnly": true
+      }
+    },
+    "fs": {
+      "workspaceOnly": false
+    },
+    "agentToAgent": {
+      "enabled": false
+    },
+    "message": {
+      "crossContext": {
+        "allowWithinProvider": false,
+        "allowAcrossProviders": false
+      },
+      "broadcast": { "enabled": false }
+    },
+    "elevated": {
+      "enabled": false
+    }
+  },
+  "browser": {
+    "enabled": false
+  }
+}

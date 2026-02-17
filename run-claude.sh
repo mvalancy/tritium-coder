@@ -35,7 +35,7 @@ log_ok "Proxy running on port ${PROXY_PORT}"
 log_ok "Claude Code CLI found"
 echo ""
 
-echo -e "  ${DIM}Connecting Claude Code to local MiniMax-M2.5...${RST}"
+echo -e "  ${DIM}Connecting Claude Code to local Qwen3-Coder-Next...${RST}"
 echo -e "  ${DIM}Model:  ${OLLAMA_MODEL_NAME}${RST}"
 echo -e "  ${DIM}Proxy:  http://localhost:${PROXY_PORT}${RST}"
 echo -e "  ${DIM}Mode:   Fully offline -- no Anthropic connection${RST}"
@@ -43,7 +43,7 @@ echo ""
 
 # --- Launch Claude Code pointing at local proxy ---
 export ANTHROPIC_BASE_URL="http://localhost:${PROXY_PORT}"
-export ANTHROPIC_API_KEY="local-minimax-m2.5"
+export ANTHROPIC_API_KEY="local-qwen3-coder-next"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_ENABLE_TELEMETRY=0
 

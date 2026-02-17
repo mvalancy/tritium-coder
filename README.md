@@ -1,8 +1,8 @@
 # Tritium Coder
 
-**Dead simple one-button local coder utilizing the shifting landscape of the best open source tools and models.**
+**Dead simple local AI coding stack. One install. One command. Scale across your hardware mesh.**
 
-Run a 229-billion parameter AI coding assistant on your own hardware. No cloud. No API keys. No data leaves your machine.
+Run AI coding agents on your own hardware — one machine or a fleet. No cloud. No API keys. No data leaves your network.
 
 *By Matthew Valancy | Valpatel Software | (c) 2026*
 
@@ -10,21 +10,156 @@ Run a 229-billion parameter AI coding assistant on your own hardware. No cloud. 
 
 ## What Is This?
 
-Tritium Coder turns a mini PC into a fully self-contained AI coding workstation. One script downloads a state-of-the-art open source model, wires it into professional coding tools, and gets out of your way.
+Tritium Coder turns local hardware into an AI coding workstation — and scales it into an agent mesh across multiple machines. One script downloads a state-of-the-art model, wires it into professional coding tools with a web dashboard, and gets out of your way. Add more machines to your Tailscale network and they join the mesh automatically.
+
+**Three ways to interact:**
+
+1. **Dashboard** — Web UI for chat, job management, exec approvals, and config (`openclaw dashboard`)
+2. **Terminal agent** — Interactive CLI agent that reads, writes, runs, and debugs code (`./run-openclaw.sh`)
+3. **Claude Code** — Drop-in replacement for Claude using your local model (`./run-claude.sh`)
 
 **Current default stack (every piece is swappable):**
 
 | Layer | Current Default | Swap With |
 |-------|----------------|-----------|
-| **Language Model** | [MiniMax-M2.5](https://huggingface.co/MiniMaxAI/MiniMax-M2.5) (229B MoE) | Any GGUF model on HuggingFace |
+| **Language Model** | [Qwen3-Coder-Next](https://ollama.com/library/qwen3-coder-next) (80B MoE, 3B active) | Any Ollama model with tool calling |
 | **Model Server** | [Ollama](https://ollama.com) | vLLM, SGLang, llama.cpp, LM Studio |
+| **Agent + Dashboard** | [OpenClaw](https://github.com/openclaw/openclaw) | Any OpenAI-compatible client |
 | **Coding Agent** | [Claude Code](https://github.com/anthropics/claude-code) | Aider, Continue, Cursor, Cline |
-| **Agent Manager** | [OpenClaw](https://github.com/openclaw/openclaw) | Any OpenAI-compatible client |
 | **API Bridge** | [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) | LiteLLM, claude-adapter |
 
 Every component talks through standard APIs (OpenAI-compatible or Anthropic-compatible). Swap any layer without touching the others. When a better model drops, change one variable and re-run install.
 
-Everything runs offline after the initial setup download.
+## Quick Start
+
+```bash
+git clone https://github.com/mvalancy/tritium-coder.git
+cd tritium-coder
+./install.sh
+```
+
+That's it. The installer handles everything:
+
+1. Checks and installs system dependencies (Ollama, Python, Node.js, Git)
+2. Downloads the coding model via Ollama (~50 GB for Qwen3-Coder-Next)
+3. Sets up the Claude Code translation proxy
+4. Installs and configures OpenClaw with hardened security
+
+### After install:
+
+```bash
+./start.sh            # Start the full stack (Ollama + proxy + gateway)
+openclaw dashboard    # Open the web dashboard (chat, config, approvals)
+./run-openclaw.sh     # Launch terminal agent
+./run-claude.sh       # Launch Claude Code with local model
+./stop.sh             # Stop and free memory
+./status.sh           # Check what's running
+```
+
+**See [USAGE.md](USAGE.md) for detailed workflows, examples, and tips.**
+
+## Architecture
+
+### Single Machine
+
+```
+ You ─── Browser ──────── OpenClaw Dashboard (localhost:18789)
+  |                              |
+  |─── ./run-openclaw.sh ─── OpenClaw Agent ──┐
+  |                                            |
+  |─── ./run-claude.sh ──── Claude Code CLI    |
+  |                              |             |
+  |                         (Anthropic API)    |
+  |                              |             |
+  |                        claude-code-proxy   |
+  |                         (:8082)            |
+  |                              |             |
+  └──────────────────────── Ollama :11434 ─────┘
+                                 |
+                       Qwen3-Coder-Next (80B MoE)
+                          full tool calling
+```
+
+### Agent Mesh (Tailscale)
+
+Scale across multiple machines on your Tailscale network. The primary node runs the heavy thinking model and the OpenClaw gateway; mesh nodes run specialized models (vision, fast code, embeddings, etc). Each node just needs Ollama — no other setup required.
+
+```
+ ┌───────────────────────────────────────────────┐
+ │  Primary Node                                 │
+ │  GB10 / workstation / whatever is biggest     │
+ │                                               │
+ │  Ollama → Qwen3-Coder-Next (thinking model)  │
+ │  OpenClaw Gateway + Dashboard                 │
+ │  Claude Code proxy                            │
+ └───────────────────┬───────────────────────────┘
+                     │ Tailscale (private network)
+        ┌────────────┼────────────┐
+        │            │            │
+ ┌──────┴──────┐ ┌───┴──────┐ ┌──┴────────────┐
+ │ Mesh Node   │ │ Mesh Node│ │ Mesh Node ... │
+ │ (GB10, Orin │ │ (Orin,   │ │ (RTX card,    │
+ │  AGX, etc)  │ │  RTX)    │ │  Jetson, etc) │
+ │ Ollama →    │ │ Ollama → │ │ Ollama →      │
+ │ vision model│ │ fast code│ │ embeddings    │
+ └─────────────┘ └──────────┘ └───────────────┘
+```
+
+**Add a mesh node to `config/openclaw.json`:**
+
+```json
+{
+  "models": {
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "api": "ollama",
+        "models": [{ "id": "qwen3-coder-next", "reasoning": true }]
+      },
+      "mesh-node-a": {
+        "baseUrl": "http://<tailscale-ip-or-hostname>:11434",
+        "api": "ollama",
+        "models": [{ "id": "llava-next", "input": ["text", "image"] }]
+      },
+      "mesh-node-b": {
+        "baseUrl": "http://<tailscale-ip-or-hostname>:11434",
+        "api": "ollama",
+        "models": [{ "id": "qwen2.5-coder:7b" }]
+      }
+    }
+  }
+}
+```
+
+**Setting up a new mesh node:**
+```bash
+# On any machine on your Tailnet:
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull <model-name>
+# That's it. Add the provider entry on the primary node.
+```
+
+**Example mesh roles:**
+
+| Role | Model | Hardware | Purpose |
+|------|-------|----------|---------|
+| Primary thinker | Qwen3-Coder-Next 80B | GB10 (128 GB) | Planning, complex code, debugging |
+| Fast coder | Qwen2.5-Coder 7B | Orin AGX (64 GB) | Quick edits, completions, tests |
+| Vision | LLaVA-Next | Any GPU | Screenshot analysis, UI review |
+| Embeddings | nomic-embed-text | Any CPU | Code search, RAG |
+
+## Why Qwen3-Coder-Next?
+
+The default model was chosen because **it actually works as a coding agent.** Tool calling support through Ollama means it can read files, edit code, run commands, and debug — the full agentic loop.
+
+| Model | Size | Tool Calling | Agent Mode | Speed |
+|-------|------|-------------|------------|-------|
+| **Qwen3-Coder-Next** (default) | ~50 GB | Yes | Full agent | Fast (3B active MoE) |
+| Devstral-2 123B | ~75 GB | Yes | Full agent | Slower (dense) |
+| GPT-OSS 120B | ~65 GB | Yes | Full agent | Fast (5.1B active MoE) |
+| MiniMax-M2.5 229B | ~56 GB | No | Chat only | Slow |
+
+To use a different model, edit `OLLAMA_MODEL_NAME` in `.lib/common.sh` and update `.proxy/.env`.
 
 ## Minimum System Requirements
 
@@ -38,128 +173,79 @@ Everything runs offline after the initial setup download.
 
 ### Tested Hardware
 
-Tritium Coder is designed for prosumer and engineering mini PCs in the $3,000 - $20,000 range:
+| Device | RAM | Price Range | Fit |
+|--------|-----|-------------|-----|
+| **NVIDIA GB10** (Grace Blackwell) | 128 GB unified | ~$3,000 | Best value |
+| **NVIDIA Jetson AGX Thor** | 128 GB unified | ~$5,000+ | Excellent |
+| **Custom workstation** (RTX 5090 x2) | 128 GB+ | $8,000-$15,000 | Great |
+| **Apple Mac Studio** (M4 Ultra) | 192 GB unified | ~$8,000 | Use MLX quants |
 
-| Device | RAM | GPU | Price Range | Fit |
-|--------|-----|-----|-------------|-----|
-| **NVIDIA GB10** (Grace Blackwell) | 128 GB unified | Blackwell | ~$3,000 | Best value |
-| **NVIDIA Jetson AGX Thor** | 128 GB unified | Thor | ~$5,000+ | Excellent |
-| **Custom workstation** (RTX 5090 x2) | 128 GB+ | 2x 32 GB VRAM | $8,000-$15,000 | Great |
-| **NVIDIA DGX Station** | 256 GB+ | Multiple GPUs | $15,000+ | Overkill but works |
-| **Apple Mac Studio** (M4 Ultra) | 192 GB unified | Integrated | ~$8,000 | Use MLX quants instead |
+For multi-node setups, satellite machines can be much smaller (any machine that can run Ollama with your chosen model).
 
-## Quick Start
+## Security
 
-```bash
-git clone https://github.com/mvalancy/tritium-coder.git
-cd tritium-coder
-./install.sh
-```
+Tritium Coder is hardened for **local coding work only**:
 
-That's it. The installer handles everything:
+- **Localhost-only gateway** — not exposed on the network by default
+- **Token authentication** — all gateway access requires an auth token
+- **Allowlist shell execution** — commands must be explicitly approved before running
+- **No browser automation** — Playwright/Chrome automation is disabled
+- **No elevated permissions** — no sudo, no root access
+- **Web search enabled** — the agent can search docs for research, but cannot install software or modify the system
+- **Tailscale Serve** — optional HTTPS remote access through your private Tailnet (not the open internet)
 
-1. Checks and installs system dependencies (Ollama, Python, Node.js, Git)
-2. Downloads the quantized model from HuggingFace (~56 GB for default UD-TQ1_0)
-3. Imports the model into Ollama
-4. Sets up the Claude Code translation proxy
-5. Installs and configures OpenClaw
-
-### After install:
-
-```bash
-./start.sh          # Start the local AI stack
-./run-claude.sh     # Code with Claude Code (offline)
-./run-openclaw.sh   # Code with OpenClaw (offline)
-./stop.sh           # Stop and free memory
-./status.sh         # Check what's running
-```
-
-## Architecture
-
-```
- You
-  |
-  |--- ./run-claude.sh ----> Claude Code CLI
-  |                              |
-  |                         (Anthropic API)
-  |                              |
-  |                       claude-code-proxy :8082
-  |                         (translates to OpenAI API)
-  |                              |
-  |--- ./run-openclaw.sh -> OpenClaw ----+
-                                         |
-                                    (OpenAI API)
-                                         |
-                                   Ollama :11434
-                                         |
-                                MiniMax-M2.5 (GGUF)
-                                  quantized to fit
-```
-
-## Choosing a Quantization
-
-Pick a quantization that fits your RAM. The installer defaults to `UD-TQ1_0` which is stable on 128 GB systems with plenty of headroom.
-
-```bash
-QUANT=UD-IQ2_M   ./install.sh   # Better quality, needs more RAM
-QUANT=Q2_K_L     ./install.sh   # Higher quality, tight on 128 GB
-```
-
-| Quantization | Download | RAM Needed | Quality | Best For |
-|-------------|----------|------------|---------|----------|
-| `UD-TQ1_0` | ~56 GB | ~72 GB | Good (default) | 128 GB systems |
-| `UD-IQ1_M` | ~68 GB | ~84 GB | Better | 128 GB systems |
-| `UD-IQ2_M` | ~78 GB | ~96 GB | Great | 128 GB+ with headroom |
-| `Q2_K_L` | ~83 GB | ~100 GB | Higher | 128 GB+ (tighter fit) |
-| `UD-IQ3_XXS` | ~93 GB | ~110 GB | Best | 192 GB+ systems |
+See [USAGE.md](USAGE.md#security-model) for the full security breakdown.
 
 ## File Structure
 
 ```
 tritium-coder/
   install.sh          # One-click installer (run this first)
-  start.sh            # Start the AI stack
+  start.sh            # Start the AI stack (Ollama + proxy + gateway)
   stop.sh             # Stop and free memory
   run-claude.sh       # Launch Claude Code locally
-  run-openclaw.sh     # Launch OpenClaw locally
+  run-openclaw.sh     # Launch OpenClaw agent locally
   status.sh           # Check stack status
+  USAGE.md            # Practical workflows and examples
   README.md           # This file
   LICENSE             # MIT License
   .lib/
     common.sh         # Shared UI library
   config/
-    Modelfile         # Ollama model definition (generated)
-    openclaw.json     # OpenClaw local config (generated)
-  models/             # Downloaded model files (~56 GB+)
+    openclaw.json     # OpenClaw hardened config
   logs/               # Runtime logs
   .proxy/             # Claude Code proxy (auto-cloned)
+  .openclaw/          # OpenClaw (auto-cloned)
 ```
 
-## How It Works
+## Swapping Components
 
-**Model serving:** Ollama loads the quantized GGUF and exposes an OpenAI-compatible API on `localhost:11434`. GPU layers are maximized for inference speed on unified memory systems.
+**Different model:**
+```bash
+# Edit .lib/common.sh: change OLLAMA_MODEL_NAME
+# Edit .proxy/.env: change model slots
+# Then:
+ollama pull your-new-model
+./start.sh
+```
 
-**Claude Code:** Expects Anthropic's Messages API. The proxy on port 8082 translates between Anthropic and OpenAI formats. Environment variables redirect Claude Code to the local proxy with all telemetry disabled.
+**Different coding agent:** Replace `run-claude.sh` with your agent's launch script. As long as it talks to an OpenAI-compatible or Anthropic-compatible endpoint, it works.
 
-**OpenClaw:** Connects to Ollama natively via its Ollama provider. Zero-cost model configuration for fully local operation.
+**Different model server:** Point the proxy's `OPENAI_BASE_URL` at your server. Ollama, vLLM, SGLang, LM Studio — they all speak OpenAI API.
+
+**Add a satellite node:**
+```bash
+# On the satellite machine:
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llava-next   # or whatever model you need
+# Then add the provider to config/openclaw.json on the main machine
+```
 
 ## Troubleshooting
 
-### Out of memory / system freezes
-
-Your quantization is too large. Stop and try a smaller one:
-
-```bash
-./stop.sh
-QUANT=UD-IQ2_M ./install.sh
-```
-
 ### Slow responses
 
-This is a 229B parameter model. First tokens may take 10-30 seconds. Tips:
-- Close other memory-heavy applications
-- Use a smaller quantization
-- Reduce context length: edit `config/Modelfile`, change `num_ctx` to `16384`
+Qwen3-Coder-Next is an 80B MoE model (only 3B active per token). If responses are still slow, close other memory-heavy applications.
 
 ### Proxy won't start
 
@@ -167,6 +253,13 @@ This is a 229B parameter model. First tokens may take 10-30 seconds. Tips:
 ss -tlnp | grep 8082    # Check what's on the port
 ./stop.sh               # Clean stop
 ./start.sh              # Restart
+```
+
+### Dashboard "requires secure context" error
+
+The browser needs HTTPS or localhost. Make sure you're accessing `http://localhost:18789`, not an IP address. For remote access, set up Tailscale Serve:
+```bash
+tailscale serve 18789
 ```
 
 ### OpenClaw says "Node >= 22 required"
@@ -183,47 +276,23 @@ Re-run `./install.sh`. The download resumes from where it left off.
 ### Logs
 
 ```bash
-tail -f logs/ollama.log      # Ollama server
-tail -f logs/proxy.log       # Claude Code proxy
-tail -f logs/download.log    # Model download
+tail -f logs/ollama.log                # Ollama server
+tail -f logs/proxy.log                 # Claude Code proxy
+tail -f logs/openclaw-gateway.log      # OpenClaw gateway
+openclaw logs --follow                 # OpenClaw agent logs
 ```
 
 ## Uninstall
 
 ```bash
 ./stop.sh
-ollama rm minimax-m2.5-local
-rm -rf ~/Code/tritium-coder     # or wherever you cloned it
+ollama rm qwen3-coder-next
+rm -rf ~/Code/tritium-coder
 ```
-
-## Project Philosophy
-
-The AI coding landscape moves fast. New models drop every month. New tools appear every week. Tritium Coder is built to ride that wave without locking you into anything.
-
-- **One button:** Clone, run install, start coding. No YAML configs, no Docker compose, no dependency hell.
-- **Local first:** Your code stays on your machine. Period.
-- **Loosely coupled:** Every layer (model, server, agent, manager) communicates through standard APIs. Swap any piece without touching the rest. Nothing is precious.
-- **Model agnostic:** Today it's MiniMax-M2.5. Tomorrow it might be Qwen, DeepSeek, Llama, or something that doesn't exist yet. Change `QUANT` and the model name, re-run install.
-- **Tool agnostic:** Claude Code today, Aider tomorrow. OpenClaw now, something better next month. The architecture doesn't care.
-- **Affordable:** A $3,000 mini PC runs a 229B parameter model. That was unthinkable two years ago.
-
-### Swapping Components
-
-**Different model:**
-```bash
-# Edit install.sh: change the HuggingFace repo and model name
-# Then re-run:
-./install.sh
-```
-
-**Different coding agent:** Replace `run-claude.sh` with your agent's launch script. As long as it talks to an OpenAI-compatible endpoint, it works.
-
-**Different model server:** Point the proxy's `OPENAI_BASE_URL` at your server. Ollama, vLLM, SGLang, LM Studio -- they all speak OpenAI API.
 
 ## Credits
 
-- [MiniMax-M2.5](https://huggingface.co/MiniMaxAI/MiniMax-M2.5) by MiniMaxAI
-- [GGUF Quantizations](https://huggingface.co/unsloth/MiniMax-M2.5-GGUF) by Unsloth
+- [Qwen3-Coder-Next](https://ollama.com/library/qwen3-coder-next) by Alibaba/Qwen
 - [Ollama](https://ollama.com)
 - [Claude Code](https://github.com/anthropics/claude-code) by Anthropic
 - [OpenClaw](https://github.com/openclaw/openclaw)

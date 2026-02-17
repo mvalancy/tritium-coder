@@ -56,7 +56,7 @@ banner() {
     echo ""
     echo -e "  ${BMAG}+$(printf '%0.s-' $(seq 1 $width))+"
     echo -e "  |${RST}  ${BOLD}${WHT}TRITIUM CODER${RST}  ${DIM}Local AI Coding Stack${RST}                        ${BMAG}|"
-    echo -e "  |${RST}  ${CYN}MiniMax-M2.5${RST} + ${CYN}Claude Code${RST} + ${CYN}OpenClaw${RST}                 ${BMAG}|"
+    echo -e "  |${RST}  ${CYN}Qwen3-Coder-Next${RST} + ${CYN}Claude Code${RST} + ${CYN}OpenClaw${RST}             ${BMAG}|"
     echo -e "  |${RST}  ${DIM}(c) 2026 Matthew Valancy  |  Valpatel Software${RST}        ${BMAG}|"
     echo -e "  +$(printf '%0.s-' $(seq 1 $width))+${RST}"
     echo ""
@@ -115,5 +115,5 @@ PROXY_DIR="$PROJECT_DIR/.proxy"
 LOG_DIR="$PROJECT_DIR/logs"
 CONFIG_DIR="$PROJECT_DIR/config"
 
-OLLAMA_MODEL_NAME="minimax-m2.5-local"
+OLLAMA_MODEL_NAME="qwen3-coder-next"
 PROXY_PORT=8082

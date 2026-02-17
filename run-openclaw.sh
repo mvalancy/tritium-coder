@@ -33,26 +33,66 @@ fi
 log_ok "Ollama running"
 log_ok "OpenClaw installed"
 
-# --- Apply config if not already set ---
-if [ ! -f "$HOME/.openclaw/openclaw.json" ]; then
-    log_run "Copying local model config to ~/.openclaw/openclaw.json"
+# --- Apply hardened local-only config ---
+OC_CONFIG="$HOME/.openclaw/openclaw.json"
+if [ ! -f "$OC_CONFIG" ]; then
+    log_run "Applying hardened local-only config to ~/.openclaw/openclaw.json"
     mkdir -p "$HOME/.openclaw"
-    cp "$CONFIG_DIR/openclaw.json" "$HOME/.openclaw/openclaw.json"
-    log_ok "Config applied"
+    cp "$CONFIG_DIR/openclaw.json" "$OC_CONFIG"
+    log_ok "Hardened config applied"
 else
-    log_info "Using existing ~/.openclaw/openclaw.json"
-    log_info "Local model config available at: config/openclaw.json"
+    # Check if it has our security settings
+    if ! grep -q '"enabled": false' "$OC_CONFIG" 2>/dev/null || ! grep -q '"workspaceOnly": true' "$OC_CONFIG" 2>/dev/null; then
+        log_warn "Existing config may not have security hardening."
+        log_info "Our hardened config is at: ${CYN}config/openclaw.json${RST}"
+        log_info "To apply: ${CYN}cp config/openclaw.json ~/.openclaw/openclaw.json${RST}"
+    else
+        log_ok "Using hardened config at ~/.openclaw/openclaw.json"
+    fi
 fi
 
 echo ""
-echo -e "  ${DIM}Connecting OpenClaw to local MiniMax-M2.5...${RST}"
+echo -e "  ${DIM}Connecting OpenClaw to local Qwen3-Coder-Next...${RST}"
 echo -e "  ${DIM}Model:  ollama/${OLLAMA_MODEL_NAME}${RST}"
 echo -e "  ${DIM}Mode:   Fully offline -- no cloud APIs${RST}"
 echo ""
+echo -e "  ${BOLD}Security:${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Web search / fetch    ${DIM}enabled (research only)${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Browser automation    ${DIM}disabled${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Software installs     ${DIM}blocked (exec allowlist)${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Filesystem access     ${DIM}local only (loopback)${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Network access        ${DIM}localhost only (add tailscale serve for remote)${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Elevated permissions  ${DIM}disabled${RST}"
+echo ""
 
-# --- Launch OpenClaw ---
+# --- Start gateway in background if not already running ---
+GATEWAY_PORT=18789
+if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+    log_ok "OpenClaw gateway already running on port ${GATEWAY_PORT}"
+else
+    log_run "Starting OpenClaw gateway..."
+    ensure_dir "$LOG_DIR"
+    (
+        cd "$PROJECT_DIR"
+        nohup openclaw gateway run --bind loopback > "$LOG_DIR/openclaw-gateway.log" 2>&1 &
+        echo $! > "$LOG_DIR/openclaw-gateway.pid"
+    )
+    sleep 4
+    if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+        log_ok "Gateway started on port ${GATEWAY_PORT}"
+    else
+        log_warn "Gateway may not have started. Check $LOG_DIR/openclaw-gateway.log"
+    fi
+fi
+
+# --- Launch OpenClaw agent ---
 export OLLAMA_API_KEY="ollama-local"
+export OPENCLAW_GATEWAY_TOKEN="tritium-local-dev"
+
+MSG="${1:-Hello! I am ready to help you code. Ask me to write, review, or debug code for any project.}"
 
 exec openclaw agent \
-    --message "${1:-Hello! I am ready to help you code.}" \
+    --local \
+    --session-id "tritium-local" \
+    --message "$MSG" \
     --thinking medium

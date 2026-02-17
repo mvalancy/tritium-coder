@@ -79,6 +79,35 @@ else
     fi
 fi
 
+# --- 5. OpenClaw Gateway ---
+GATEWAY_PORT=18789
+if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+    log_ok "OpenClaw gateway already running on port ${GATEWAY_PORT}"
+else
+    if command -v openclaw &>/dev/null; then
+        # Apply hardened config if not present
+        OC_CONFIG="$HOME/.openclaw/openclaw.json"
+        if [ ! -f "$OC_CONFIG" ]; then
+            mkdir -p "$HOME/.openclaw"
+            cp "$CONFIG_DIR/openclaw.json" "$OC_CONFIG"
+        fi
+        log_run "Starting OpenClaw gateway..."
+        (
+            cd "$PROJECT_DIR"
+            nohup openclaw gateway run --bind loopback > "$LOG_DIR/openclaw-gateway.log" 2>&1 &
+            echo $! > "$LOG_DIR/openclaw-gateway.pid"
+        )
+        sleep 4
+        if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+            log_ok "OpenClaw gateway started on port ${GATEWAY_PORT}"
+        else
+            log_warn "OpenClaw gateway may not have started. Check $LOG_DIR/openclaw-gateway.log"
+        fi
+    else
+        log_warn "OpenClaw not installed (optional). Install: npm install -g openclaw@latest"
+    fi
+fi
+
 # --- Ready ---
 echo ""
 echo -e "  ${BMAG}+--------------------------------------------------------------+"
@@ -88,10 +117,15 @@ echo ""
 echo -e "  ${BOLD}Services:${RST}"
 echo -e "    Ollama API        ${BGRN}http://localhost:11434${RST}"
 echo -e "    Claude Code Proxy ${BGRN}http://localhost:${PROXY_PORT}${RST}"
+if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+echo -e "    OpenClaw Gateway  ${BGRN}http://localhost:${GATEWAY_PORT}${RST}"
+echo -e "    Dashboard         ${BGRN}http://localhost:${GATEWAY_PORT}/#token=tritium-local-dev${RST}"
+fi
 echo ""
 echo -e "  ${BOLD}Next:${RST}"
-echo -e "    ${CYN}./run-claude.sh${RST}     Launch Claude Code"
-echo -e "    ${CYN}./run-openclaw.sh${RST}   Launch OpenClaw"
-echo -e "    ${CYN}./status.sh${RST}         Check status"
-echo -e "    ${CYN}./stop.sh${RST}           Stop everything"
+echo -e "    ${CYN}./run-claude.sh${RST}       Launch Claude Code (terminal)"
+echo -e "    ${CYN}./run-openclaw.sh${RST}     Launch OpenClaw agent (terminal)"
+echo -e "    ${CYN}openclaw dashboard${RST}    Open dashboard (browser)"
+echo -e "    ${CYN}./status.sh${RST}           Check status"
+echo -e "    ${CYN}./stop.sh${RST}             Stop everything"
 echo ""
