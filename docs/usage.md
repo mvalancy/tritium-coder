@@ -9,12 +9,38 @@
 ## Quick Reference
 
 ```bash
-scripts/start.sh          # Start the AI stack (Ollama + proxy + gateway)
+./start                   # Start the AI stack (Ollama + proxy + gateway)
+./dashboard               # Open control panel (service status, quick actions)
+openclaw dashboard        # Open OpenClaw chat dashboard
 scripts/run-claude.sh     # Launch Claude Code with local model (interactive terminal)
 scripts/run-openclaw.sh   # Launch OpenClaw agent (interactive terminal)
-openclaw dashboard  # Open the web dashboard (chat, config, approvals)
-scripts/stop.sh           # Stop everything and free memory
-scripts/status.sh         # Check what's running
+./stop                    # Stop everything and free memory
+./status                  # Check what's running
+./test                    # Run test suite
+```
+
+---
+
+## Control Panel
+
+The control panel is a lightweight web UI for monitoring the stack at a glance.
+
+```bash
+./dashboard     # Starts the panel and opens your browser
+```
+
+**What it shows:**
+- **Services** — live status of Ollama, Proxy, and Gateway (green/red dots)
+- **Model** — which model is loaded, size, tool calling support
+- **Resources** — estimated memory and GPU usage when model is loaded
+- **Quick Actions** — buttons to open chat, send test jobs, view logs, copy terminal commands
+- **Activity Log** — timestamped event log, auto-refreshes every 15 seconds
+
+The panel runs on `http://localhost:18790` and polls the services directly from your browser. It's separate from the OpenClaw chat dashboard (port 18789).
+
+**Stop the panel:**
+```bash
+./stop          # Stops everything including the panel
 ```
 
 ---
@@ -235,20 +261,14 @@ Sessions persist across restarts. You can pick up any previous conversation.
 
 ### 5. Approve commands
 
-The agent runs in **exec allowlist** mode. Pre-approved commands (python3, node, npm, git, ls, cat, mkdir) run automatically. Anything else triggers a prompt.
+The agent runs in **full exec** mode — it can run any shell command without approval prompts. This lets it install dependencies, run tests, and build projects autonomously.
 
-**Add commands to the allowlist:**
+**Safety limits still apply:** no sudo, no elevated permissions, no browser automation. The agent runs as your normal user.
 
-```bash
-openclaw approvals allowlist add "pip install"
-openclaw approvals allowlist add "pytest"
-openclaw approvals allowlist add "docker"
-```
+To switch to a more restrictive allowlist mode, edit `config/openclaw.json`:
 
-**View current allowlist:**
-
-```bash
-openclaw approvals allowlist list
+```json
+"exec": { "security": "allowlist", "safeBins": ["python3", "node", "git", "ls", "cat", "mkdir"] }
 ```
 
 ### 6. Review the output
@@ -330,7 +350,7 @@ Tritium Coder is configured for **local coding work only**. The OpenClaw config 
 | Control | Setting | What It Means |
 |---------|---------|---------------|
 | **Gateway binding** | `loopback` | Localhost only by default. Add Tailscale Serve for HTTPS remote access on your private Tailnet. Token auth required. |
-| **Shell execution** | `allowlist` | Commands must be explicitly approved. No `apt install`, `pip install`, etc. without your OK. |
+| **Shell execution** | `full` | Agent can run any command. No sudo or elevated permissions. |
 | **Filesystem** | `local` | Full local filesystem access. The agent can read/write files anywhere you tell it to. |
 | **Browser automation** | `disabled` | No Playwright/Chrome automation. The agent cannot browse the web autonomously. |
 | **Web search/fetch** | `enabled` | Can search the web and fetch documentation for research. Read-only. |
@@ -360,7 +380,7 @@ Edit `config/openclaw.json` to adjust. For example, to completely disable web ac
 }
 ```
 
-To allow specific shell commands without prompting:
+To restrict which commands the agent can run (default is `full`):
 
 ```json
 "exec": {

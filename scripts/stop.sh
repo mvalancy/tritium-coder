@@ -13,6 +13,15 @@ banner
 
 section "Shutting Down"
 
+# --- Stop control panel ---
+if [ -f "$LOG_DIR/panel.pid" ]; then
+    PID=$(cat "$LOG_DIR/panel.pid")
+    kill "$PID" 2>/dev/null && log_ok "Control panel stopped" || log_skip "Panel was not running"
+    rm -f "$LOG_DIR/panel.pid"
+else
+    log_skip "Panel was not running"
+fi
+
 # --- Stop proxy ---
 if pgrep -f "start_proxy.py" &>/dev/null; then
     pkill -f "start_proxy.py" 2>/dev/null || true

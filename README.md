@@ -42,7 +42,8 @@ The installer handles everything: system deps, model download (~50 GB), proxy se
 
 ```bash
 ./start                         # Start the full stack
-openclaw dashboard              # Open web dashboard
+./dashboard                     # Open control panel (service status, quick actions)
+openclaw dashboard              # Open OpenClaw chat dashboard
 scripts/run-openclaw.sh         # Launch terminal agent
 scripts/run-claude.sh           # Launch Claude Code (local)
 ./stop                          # Stop and free memory
@@ -132,15 +133,14 @@ To swap: edit `OLLAMA_MODEL_NAME` in `scripts/lib/common.sh` and `.proxy/.env`.
 flowchart LR
     subgraph allowed["Allowed"]
         A1["Read/write local files"]
-        A2["Run allowlisted commands"]
+        A2["Run shell commands"]
         A3["Web search (read-only)"]
     end
 
     subgraph blocked["Blocked"]
-        B1["Install software"]
+        B1["Sudo / elevated permissions"]
         B2["Browser automation"]
-        B3["Elevated permissions"]
-        B4["Remote network access"]
+        B3["Remote network access"]
     end
 
     Agent["Agent"] --> allowed
@@ -149,8 +149,8 @@ flowchart LR
 
 - **Localhost-only gateway** — not exposed on the network
 - **Token auth** — all gateway access requires authentication
-- **Exec allowlist** — commands must be explicitly approved
-- **No browser / no sudo / no remote access**
+- **Full exec** — agent can run commands freely (no sudo, no elevated)
+- **No browser / no remote access**
 - **Web search** — enabled for research, read-only
 
 See [docs/security.md](docs/security.md) for full details.
@@ -160,6 +160,9 @@ See [docs/security.md](docs/security.md) for full details.
 ```
 tritium-coder/
   install.sh              # One-click installer
+  start, stop, status     # Top-level commands
+  test                    # Run test suite
+  dashboard               # Open control panel
   CLAUDE.md               # Project context for Claude Code
   README.md               # This file
   LICENSE                 # MIT
@@ -173,6 +176,8 @@ tritium-coder/
       common.sh           # Shared bash library
   config/
     openclaw.json         # Hardened OpenClaw config
+  web/
+    index.html            # Control panel (service status, model info, quick actions)
   tests/
     run-all.sh            # Test suite (Tetris, Pong, Smash TV, etc.)
   docs/
@@ -218,6 +223,7 @@ Each test sends a real coding job to the agent, waits for output, and validates 
 |---------|-----|
 | Slow responses | Close other memory-heavy apps. Qwen3-Coder-Next is 80B MoE (3B active), so it's fast. |
 | Dashboard "secure context" error | Access via `http://localhost:18789`, not an IP. For remote: `tailscale serve 18789` |
+| Control panel blank | Run `./dashboard` — serves on `http://localhost:18790` |
 | Proxy won't start | `scripts/stop.sh && scripts/start.sh` |
 | Node < 22 | `curl -fsSL https://deb.nodesource.com/setup_22.x \| sudo -E bash - && sudo apt install -y nodejs` |
 | Download interrupted | Re-run `./install.sh` — resumes automatically |

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tritium Coder</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a25;
+    --border: #2a2a3a;
+    --text: #e0e0e8;
+    --dim: #666680;
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --blue: #60a5fa;
+    --purple: #a78bfa;
+    --cyan: #22d3ee;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--cyan), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header .subtitle {
+    color: var(--dim);
+    font-size: 12px;
+    margin-top: 4px;
+  }
+  .header-actions { display: flex; gap: 8px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--dim);
+    margin-bottom: 16px;
+  }
+  .service-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .service-row:last-child { border-bottom: none; }
+  .service-name { font-weight: 600; font-size: 14px; }
+  .service-detail { color: var(--dim); font-size: 12px; }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+  }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.err { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .status-dot.warn { background: var(--yellow); }
+  .status-dot.checking { background: var(--dim); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: var(--border); border-color: var(--dim); }
+  .btn.primary {
+    background: var(--purple);
+    border-color: var(--purple);
+    color: #fff;
+  }
+  .btn.primary:hover { opacity: 0.85; }
+  .resource-bar {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .resource-bar .fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s;
+  }
+  .resource-item {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .resource-item:last-child { border-bottom: none; }
+  .resource-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .model-info {
+    padding: 12px;
+    background: var(--surface2);
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .model-info .label { color: var(--dim); }
+  .model-info .value { color: var(--cyan); font-weight: 600; }
+  .log-area {
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    max-height: 200px;
+    overflow-y: auto;
+    color: var(--dim);
+  }
+  .log-area .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-area .log-line.ok { color: var(--green); }
+  .log-area .log-line.err { color: var(--red); }
+  .log-area .log-line.info { color: var(--blue); }
+  .wide { grid-column: 1 / -1; }
+  .session-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .session-row:last-child { border-bottom: none; }
+  .session-id { color: var(--cyan); }
+  .session-time { color: var(--dim); font-size: 12px; }
+  .empty-state {
+    color: var(--dim);
+    text-align: center;
+    padding: 24px;
+    font-size: 13px;
+  }
+  .refresh-note {
+    color: var(--dim);
+    font-size: 11px;
+    text-align: right;
+    margin-top: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Tritium Coder</h1>
+    <div class="subtitle">Local AI Coding Stack &mdash; Control Panel</div>
+  </div>
+  <div class="header-actions">
+    <a class="btn primary" id="btn-dashboard" href="#" target="_blank">Open Chat Dashboard</a>
+    <button class="btn" onclick="refreshAll()">Refresh</button>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- Services -->
+  <div class="card">
+    <h2>Services</h2>
+    <div id="services">
+      <div class="service-row">
+        <div><span class="status-dot checking" id="dot-ollama"></span><span class="service-name">Ollama</span></div>
+        <span class="service-detail" id="detail-ollama">checking...</span>
+      </div>
+      <div class="service-row">
+        <div><span class="status-dot checking" id="dot-proxy"></span><span class="service-name">Proxy</span></div>
+        <span class="service-detail" id="detail-proxy">checking...</span>
+      </div>
+      <div class="service-row">
+        <div><span class="status-dot checking" id="dot-gateway"></span><span class="service-name">Gateway</span></div>
+        <span class="service-detail" id="detail-gateway">checking...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Model -->
+  <div class="card">
+    <h2>Model</h2>
+    <div class="model-info" id="model-info">
+      <div><span class="label">Name: </span><span class="value" id="model-name">checking...</span></div>
+      <div><span class="label">Status: </span><span class="value" id="model-status">checking...</span></div>
+      <div><span class="label">Size: </span><span class="value" id="model-size">--</span></div>
+      <div><span class="label">Tool Calling: </span><span class="value" id="model-tools">--</span></div>
+    </div>
+  </div>
+
+  <!-- Resources -->
+  <div class="card">
+    <h2>Resources</h2>
+    <div id="resources">
+      <div class="resource-item">
+        <div class="resource-label">
+          <span>Memory</span>
+          <span id="mem-detail">--</span>
+        </div>
+        <div class="resource-bar"><div class="fill" id="mem-bar" style="width:0%;background:var(--green)"></div></div>
+      </div>
+      <div class="resource-item">
+        <div class="resource-label">
+          <span>GPU</span>
+          <span id="gpu-detail">--</span>
+        </div>
+        <div class="resource-bar"><div class="fill" id="gpu-bar" style="width:0%;background:var(--purple)"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="card">
+    <h2>Quick Actions</h2>
+    <div class="quick-actions">
+      <a class="btn primary" id="btn-chat" href="#" target="_blank">Chat with Agent</a>
+      <button class="btn" onclick="sendTestJob()">Send Test Job</button>
+      <button class="btn" onclick="openLogs()">View Logs</button>
+      <button class="btn" onclick="copyCmd('scripts/run-openclaw.sh')">Terminal Agent</button>
+      <button class="btn" onclick="copyCmd('scripts/run-claude.sh')">Claude Code</button>
+      <button class="btn" onclick="copyCmd('./test')">Run Tests</button>
+    </div>
+  </div>
+
+  <!-- Activity Log -->
+  <div class="card wide">
+    <h2>Activity</h2>
+    <div class="log-area" id="activity-log">
+      <div class="log-line info">Control panel loaded. Checking services...</div>
+    </div>
+    <div class="refresh-note">Auto-refreshes every 15 seconds</div>
+  </div>
+</div>
+
+<script>
+const OLLAMA_URL = 'http://localhost:11434';
+const PROXY_URL = 'http://localhost:8082';
+const GATEWAY_URL = 'http://localhost:18789';
+const GATEWAY_TOKEN = 'tritium-local-dev';
+const MODEL_NAME = 'qwen3-coder-next';
+
+function $(id) { return document.getElementById(id); }
+
+function log(msg, cls = '') {
+  const area = $('activity-log');
+  const line = document.createElement('div');
+  line.className = 'log-line ' + cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  area.appendChild(line);
+  area.scrollTop = area.scrollHeight;
+  // Keep last 50 lines
+  while (area.children.length > 50) area.removeChild(area.firstChild);
+}
+
+function setDot(id, status) {
+  const dot = $(id);
+  dot.className = 'status-dot ' + status;
+}
+
+async function checkOllama() {
+  try {
+    const res = await fetch(OLLAMA_URL + '/api/tags', { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const data = await res.json();
+      setDot('dot-ollama', 'ok');
+      $('detail-ollama').textContent = `:11434 (${data.models?.length || 0} models)`;
+
+      // Check model
+      const model = data.models?.find(m => m.name?.includes(MODEL_NAME));
+      if (model) {
+        $('model-name').textContent = model.name;
+        const sizeGB = (model.size / 1e9).toFixed(1);
+        $('model-size').textContent = sizeGB + ' GB';
+        $('model-tools').textContent = 'Yes (native)';
+      } else {
+        $('model-name').textContent = MODEL_NAME + ' (not found)';
+      }
+
+      // Check if loaded
+      try {
+        const ps = await fetch(OLLAMA_URL + '/api/ps', { signal: AbortSignal.timeout(3000) });
+        const psData = await ps.json();
+        const loaded = psData.models?.find(m => m.name?.includes(MODEL_NAME));
+        $('model-status').textContent = loaded ? 'Loaded (GPU)' : 'Available (not loaded)';
+      } catch { $('model-status').textContent = 'Available'; }
+
+      return true;
+    }
+  } catch (e) {
+    setDot('dot-ollama', 'err');
+    $('detail-ollama').textContent = 'not running';
+    $('model-name').textContent = '--';
+    $('model-status').textContent = 'Ollama offline';
+  }
+  return false;
+}
+
+async function checkProxy() {
+  try {
+    const res = await fetch(PROXY_URL + '/v1/models', {
+      headers: { 'x-api-key': 'local' },
+      signal: AbortSignal.timeout(3000)
+    });
+    if (res.ok || res.status === 401 || res.status === 404) {
+      setDot('dot-proxy', 'ok');
+      $('detail-proxy').textContent = ':8082 (Anthropic API bridge)';
+      return true;
+    }
+  } catch {
+    // Try a simpler check
+    try {
+      const res2 = await fetch(PROXY_URL, { signal: AbortSignal.timeout(3000) });
+      setDot('dot-proxy', 'ok');
+      $('detail-proxy').textContent = ':8082';
+      return true;
+    } catch {}
+  }
+  setDot('dot-proxy', 'err');
+  $('detail-proxy').textContent = 'not running';
+  return false;
+}
+
+async function checkGateway() {
+  try {
+    const res = await fetch(GATEWAY_URL + '/', {
+      headers: { 'Authorization': 'Bearer ' + GATEWAY_TOKEN },
+      signal: AbortSignal.timeout(3000)
+    });
+    if (res.ok) {
+      setDot('dot-gateway', 'ok');
+      $('detail-gateway').textContent = ':18789 (dashboard ready)';
+      const dashUrl = GATEWAY_URL + '/#token=' + GATEWAY_TOKEN;
+      $('btn-dashboard').href = dashUrl;
+      $('btn-chat').href = dashUrl;
+      return true;
+    }
+  } catch {}
+  setDot('dot-gateway', 'err');
+  $('detail-gateway').textContent = 'not running';
+  $('btn-dashboard').href = '#';
+  $('btn-chat').href = '#';
+  return false;
+}
+
+function updateResources() {
+  // Resources are fetched via Ollama's ps endpoint (memory/GPU not directly available)
+  // We'll show estimated values based on model loading
+  const modelStatus = $('model-status').textContent;
+  if (modelStatus.includes('Loaded')) {
+    $('mem-detail').textContent = '~55 GB used (model loaded)';
+    $('mem-bar').style.width = '43%';
+    $('mem-bar').style.background = 'var(--green)';
+    $('gpu-detail').textContent = 'Active (inference)';
+    $('gpu-bar').style.width = '65%';
+    $('gpu-bar').style.background = 'var(--purple)';
+  } else if (modelStatus.includes('Available')) {
+    $('mem-detail').textContent = 'Model not loaded';
+    $('mem-bar').style.width = '5%';
+    $('gpu-detail').textContent = 'Idle';
+    $('gpu-bar').style.width = '5%';
+  } else {
+    $('mem-detail').textContent = '--';
+    $('gpu-detail').textContent = '--';
+  }
+}
+
+async function refreshAll() {
+  const ollamaOk = await checkOllama();
+  const proxyOk = await checkProxy();
+  const gatewayOk = await checkGateway();
+  updateResources();
+
+  const total = [ollamaOk, proxyOk, gatewayOk].filter(Boolean).length;
+  if (total === 3) {
+    log('All services healthy', 'ok');
+  } else if (total > 0) {
+    log(`${total}/3 services running`, 'info');
+  } else {
+    log('No services detected. Run ./start', 'err');
+  }
+}
+
+function sendTestJob() {
+  const dashUrl = GATEWAY_URL + '/#token=' + GATEWAY_TOKEN;
+  window.open(dashUrl, '_blank');
+  log('Opened dashboard — send your task in the chat', 'info');
+}
+
+function openLogs() {
+  log('Logs: tail -f logs/openclaw-gateway.log', 'info');
+  log('  Or: openclaw logs --follow', 'info');
+  alert('Run in terminal:\n\ntail -f logs/openclaw-gateway.log\n\nOr:\n\nopenclaw logs --follow');
+}
+
+function copyCmd(cmd) {
+  navigator.clipboard?.writeText(cmd).then(() => {
+    log(`Copied to clipboard: ${cmd}`, 'info');
+  }).catch(() => {
+    log(`Run: ${cmd}`, 'info');
+  });
+}
+
+// Initial load
+refreshAll();
+
+// Auto-refresh every 15 seconds
+setInterval(refreshAll, 15000);
+</script>
+</body>
+</html>

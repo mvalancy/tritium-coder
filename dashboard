@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+#  Tritium Coder  |  Open Control Panel
+# =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/scripts/lib/common.sh"
+
+PANEL_PORT=18790
+PANEL_DIR="$PROJECT_DIR/web"
+
+# Check if something is already serving our panel
+if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
+    log_ok "Control panel already running"
+else
+    log_run "Starting control panel on port ${PANEL_PORT}..."
+    (cd "$PANEL_DIR" && nohup python3 -m http.server "$PANEL_PORT" --bind 127.0.0.1 > "$LOG_DIR/panel.log" 2>&1 &)
+    echo $! > "$LOG_DIR/panel.pid"
+    sleep 1
+fi
+
+URL="http://localhost:${PANEL_PORT}"
+
+log_ok "Control panel: ${CYN}${URL}${RST}"
+echo ""
+
+# Try to open in browser
+if command -v xdg-open &>/dev/null; then
+    xdg-open "$URL" 2>/dev/null &
+elif command -v open &>/dev/null; then
+    open "$URL" 2>/dev/null &
+else
+    log_info "Open ${CYN}${URL}${RST} in your browser"
+fi
