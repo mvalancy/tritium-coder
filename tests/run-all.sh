@@ -114,11 +114,11 @@ record_result() {
     local status="$2"
     results+=("$status  $test_name")
     if [ "$status" = "PASS" ]; then
-        ((passed++))
+        passed=$((passed + 1))
     elif [ "$status" = "FAIL" ]; then
-        ((failed++))
+        failed=$((failed + 1))
     else
-        ((skipped++))
+        skipped=$((skipped + 1))
     fi
 }
 

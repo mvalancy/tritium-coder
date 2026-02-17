@@ -41,12 +41,13 @@ The installer handles everything: system deps, model download (~50 GB), proxy se
 ### After install:
 
 ```bash
-scripts/start.sh            # Start the full stack
-openclaw dashboard          # Open web dashboard
-scripts/run-openclaw.sh     # Launch terminal agent
-scripts/run-claude.sh       # Launch Claude Code (local)
-scripts/stop.sh             # Stop and free memory
-scripts/status.sh           # Check what's running
+./start                         # Start the full stack
+openclaw dashboard              # Open web dashboard
+scripts/run-openclaw.sh         # Launch terminal agent
+scripts/run-claude.sh           # Launch Claude Code (local)
+./stop                          # Stop and free memory
+./status                        # Check what's running
+./test                          # Run test suite
 ```
 
 ## Architecture
