@@ -344,24 +344,71 @@ ENVEOF
 log_ok "Proxy configured ${DIM}(port ${PROXY_PORT})${RST}"
 
 # =========================================================================
-#  PHASE 5: OpenClaw
+#  PHASE 5: OpenClaw (cloned locally for reference + use)
 # =========================================================================
 section "Phase 5/5 : OpenClaw"
 
+OPENCLAW_DIR="$PROJECT_DIR/.openclaw"
+
 NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1 || echo "0")
 if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
-    if require_cmd openclaw; then
-        OC_VER=$(openclaw --version 2>/dev/null || echo "installed")
-        log_ok "OpenClaw ${DIM}(${OC_VER})${RST}"
+    log_ok "Node.js ${DIM}v$(node --version)${RST}"
+
+    # --- pnpm (needed for OpenClaw build) ---
+    if ! require_cmd pnpm; then
+        log_run "Installing pnpm..."
+        sudo npm install -g pnpm >> "$LOG_DIR/openclaw-install.log" 2>&1
+        log_ok "pnpm installed"
     else
-        log_run "Installing OpenClaw..."
-        npm install -g openclaw@latest >> "$LOG_DIR/openclaw-install.log" 2>&1
-        if require_cmd openclaw; then
-            log_ok "OpenClaw installed"
+        log_ok "pnpm"
+    fi
+
+    # --- Clone OpenClaw repo ---
+    if [ -d "$OPENCLAW_DIR/.git" ]; then
+        log_ok "OpenClaw repo already cloned"
+        log_info "$OPENCLAW_DIR"
+    else
+        log_run "Cloning OpenClaw repo..."
+        rm -rf "$OPENCLAW_DIR"
+        git clone https://github.com/openclaw/openclaw.git "$OPENCLAW_DIR" \
+            >> "$LOG_DIR/openclaw-install.log" 2>&1
+        log_ok "OpenClaw cloned to ${DIM}.openclaw/${RST}"
+    fi
+
+    # --- Install dependencies ---
+    if [ ! -d "$OPENCLAW_DIR/node_modules" ]; then
+        log_run "Installing OpenClaw dependencies (pnpm install)..."
+        (cd "$OPENCLAW_DIR" && pnpm install) >> "$LOG_DIR/openclaw-install.log" 2>&1
+        log_ok "Dependencies installed"
+    else
+        log_ok "Dependencies already installed"
+    fi
+
+    # --- Build from source ---
+    if [ ! -d "$OPENCLAW_DIR/dist" ]; then
+        log_run "Building OpenClaw from source..."
+        (cd "$OPENCLAW_DIR" && pnpm build) >> "$LOG_DIR/openclaw-install.log" 2>&1
+        if [ -d "$OPENCLAW_DIR/dist" ]; then
+            log_ok "OpenClaw built successfully"
         else
-            log_fail "OpenClaw install failed. See $LOG_DIR/openclaw-install.log"
-            log_info "You can install manually later: npm install -g openclaw@latest"
+            log_fail "OpenClaw build failed. See $LOG_DIR/openclaw-install.log"
         fi
+    else
+        log_ok "OpenClaw already built"
+    fi
+
+    # --- Link globally ---
+    if ! require_cmd openclaw; then
+        log_run "Linking OpenClaw globally..."
+        (cd "$OPENCLAW_DIR" && sudo npm link) >> "$LOG_DIR/openclaw-install.log" 2>&1
+    fi
+
+    if require_cmd openclaw; then
+        OC_VER=$(openclaw --version 2>/dev/null || echo "unknown")
+        log_ok "OpenClaw ${DIM}${OC_VER}${RST} (from local source)"
+    else
+        log_warn "OpenClaw build succeeded but global link failed."
+        log_info "You can run it directly: node .openclaw/scripts/run-node.mjs"
     fi
 
     # Write OpenClaw config
@@ -397,7 +444,7 @@ OCEOF
     log_ok "OpenClaw config written to ${DIM}config/openclaw.json${RST}"
 else
     log_warn "Node.js < 22 -- skipping OpenClaw"
-    log_info "Upgrade Node to 22+ and re-run to enable OpenClaw."
+    log_info "Install Node 22+, then re-run this script."
 fi
 
 # =========================================================================

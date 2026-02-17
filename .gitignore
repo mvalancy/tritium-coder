@@ -5,6 +5,9 @@ models/
 # Proxy (auto-cloned during install)
 .proxy/
 
+# OpenClaw (auto-cloned during install)
+.openclaw/
+
 # Runtime
 logs/
 *.log
