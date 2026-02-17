@@ -109,8 +109,8 @@ ensure_dir() {
 }
 
 # --- Project paths ---
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL_DIR="$PROJECT_DIR/models"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPTS_DIR="$PROJECT_DIR/scripts"
 PROXY_DIR="$PROJECT_DIR/.proxy"
 LOG_DIR="$PROJECT_DIR/logs"
 CONFIG_DIR="$PROJECT_DIR/config"

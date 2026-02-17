@@ -10,25 +10,23 @@ Run AI coding agents on your own hardware — one machine or a fleet. No cloud. 
 
 ## What Is This?
 
-Tritium Coder turns local hardware into an AI coding workstation — and scales it into an agent mesh across multiple machines. One script downloads a state-of-the-art model, wires it into professional coding tools with a web dashboard, and gets out of your way. Add more machines to your Tailscale network and they join the mesh automatically.
+Tritium Coder turns local hardware into an AI coding workstation — and scales it into an agent mesh across multiple machines. One script downloads a state-of-the-art model, wires it into professional coding tools with a web dashboard, and gets out of your way.
 
 **Three ways to interact:**
 
 1. **Dashboard** — Web UI for chat, job management, exec approvals, and config (`openclaw dashboard`)
-2. **Terminal agent** — Interactive CLI agent that reads, writes, runs, and debugs code (`./run-openclaw.sh`)
-3. **Claude Code** — Drop-in replacement for Claude using your local model (`./run-claude.sh`)
+2. **Terminal agent** — Interactive CLI that reads, writes, runs, and debugs code (`scripts/run-openclaw.sh`)
+3. **Claude Code** — Drop-in local replacement for Claude (`scripts/run-claude.sh`)
 
 **Current default stack (every piece is swappable):**
 
 | Layer | Current Default | Swap With |
 |-------|----------------|-----------|
-| **Language Model** | [Qwen3-Coder-Next](https://ollama.com/library/qwen3-coder-next) (80B MoE, 3B active) | Any Ollama model with tool calling |
+| **Language Model** | [Qwen3-Coder-Next](https://ollama.com/library/qwen3-coder-next) (80B MoE) | Any Ollama model with tool calling |
 | **Model Server** | [Ollama](https://ollama.com) | vLLM, SGLang, llama.cpp, LM Studio |
 | **Agent + Dashboard** | [OpenClaw](https://github.com/openclaw/openclaw) | Any OpenAI-compatible client |
 | **Coding Agent** | [Claude Code](https://github.com/anthropics/claude-code) | Aider, Continue, Cursor, Cline |
 | **API Bridge** | [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) | LiteLLM, claude-adapter |
-
-Every component talks through standard APIs (OpenAI-compatible or Anthropic-compatible). Swap any layer without touching the others. When a better model drops, change one variable and re-run install.
 
 ## Quick Start
 
@@ -38,119 +36,85 @@ cd tritium-coder
 ./install.sh
 ```
 
-That's it. The installer handles everything:
-
-1. Checks and installs system dependencies (Ollama, Python, Node.js, Git)
-2. Downloads the coding model via Ollama (~50 GB for Qwen3-Coder-Next)
-3. Sets up the Claude Code translation proxy
-4. Installs and configures OpenClaw with hardened security
+The installer handles everything: system deps, model download (~50 GB), proxy setup, OpenClaw + dashboard build.
 
 ### After install:
 
 ```bash
-./start.sh            # Start the full stack (Ollama + proxy + gateway)
-openclaw dashboard    # Open the web dashboard (chat, config, approvals)
-./run-openclaw.sh     # Launch terminal agent
-./run-claude.sh       # Launch Claude Code with local model
-./stop.sh             # Stop and free memory
-./status.sh           # Check what's running
+scripts/start.sh            # Start the full stack
+openclaw dashboard          # Open web dashboard
+scripts/run-openclaw.sh     # Launch terminal agent
+scripts/run-claude.sh       # Launch Claude Code (local)
+scripts/stop.sh             # Stop and free memory
+scripts/status.sh           # Check what's running
 ```
-
-**See [USAGE.md](USAGE.md) for detailed workflows, examples, and tips.**
 
 ## Architecture
 
-### Single Machine
+```mermaid
+flowchart TB
+    subgraph ui["User Interfaces"]
+        Browser["Dashboard\nlocalhost:18789"]
+        CLI_OC["Terminal Agent\nscripts/run-openclaw.sh"]
+        CLI_CC["Claude Code\nscripts/run-claude.sh"]
+    end
 
-```
- You ─── Browser ──────── OpenClaw Dashboard (localhost:18789)
-  |                              |
-  |─── ./run-openclaw.sh ─── OpenClaw Agent ──┐
-  |                                            |
-  |─── ./run-claude.sh ──── Claude Code CLI    |
-  |                              |             |
-  |                         (Anthropic API)    |
-  |                              |             |
-  |                        claude-code-proxy   |
-  |                         (:8082)            |
-  |                              |             |
-  └──────────────────────── Ollama :11434 ─────┘
-                                 |
-                       Qwen3-Coder-Next (80B MoE)
-                          full tool calling
-```
+    subgraph gw["OpenClaw Gateway :18789"]
+        Chat["Chat & Jobs"]
+        Exec["Exec Approvals"]
+        Sess["Sessions"]
+    end
 
-### Agent Mesh (Tailscale)
+    subgraph proxy["claude-code-proxy :8082"]
+        Trans["Anthropic API → OpenAI API"]
+    end
 
-Scale across multiple machines on your Tailscale network. The primary node runs the heavy thinking model and the OpenClaw gateway; mesh nodes run specialized models (vision, fast code, embeddings, etc). Each node just needs Ollama — no other setup required.
+    subgraph ollama["Ollama :11434"]
+        Model["Qwen3-Coder-Next\n80B MoE · 3B active"]
+    end
 
-```
- ┌───────────────────────────────────────────────┐
- │  Primary Node                                 │
- │  GB10 / workstation / whatever is biggest     │
- │                                               │
- │  Ollama → Qwen3-Coder-Next (thinking model)  │
- │  OpenClaw Gateway + Dashboard                 │
- │  Claude Code proxy                            │
- └───────────────────┬───────────────────────────┘
-                     │ Tailscale (private network)
-        ┌────────────┼────────────┐
-        │            │            │
- ┌──────┴──────┐ ┌───┴──────┐ ┌──┴────────────┐
- │ Mesh Node   │ │ Mesh Node│ │ Mesh Node ... │
- │ (GB10, Orin │ │ (Orin,   │ │ (RTX card,    │
- │  AGX, etc)  │ │  RTX)    │ │  Jetson, etc) │
- │ Ollama →    │ │ Ollama → │ │ Ollama →      │
- │ vision model│ │ fast code│ │ embeddings    │
- └─────────────┘ └──────────┘ └───────────────┘
+    Browser --> gw
+    CLI_OC --> gw
+    CLI_CC --> proxy
+    proxy --> ollama
+    gw --> ollama
 ```
 
-**Add a mesh node to `config/openclaw.json`:**
+### Agent Mesh (multi-node)
 
-```json
-{
-  "models": {
-    "providers": {
-      "ollama": {
-        "baseUrl": "http://127.0.0.1:11434",
-        "api": "ollama",
-        "models": [{ "id": "qwen3-coder-next", "reasoning": true }]
-      },
-      "mesh-node-a": {
-        "baseUrl": "http://<tailscale-ip-or-hostname>:11434",
-        "api": "ollama",
-        "models": [{ "id": "llava-next", "input": ["text", "image"] }]
-      },
-      "mesh-node-b": {
-        "baseUrl": "http://<tailscale-ip-or-hostname>:11434",
-        "api": "ollama",
-        "models": [{ "id": "qwen2.5-coder:7b" }]
-      }
-    }
-  }
-}
+Add machines to your Tailscale network — each runs Ollama with a specialized model.
+
+```mermaid
+flowchart TB
+    subgraph primary["Primary Node"]
+        GW["OpenClaw Gateway\n+ Dashboard"]
+        O1["Ollama → Qwen3-Coder-Next\n(thinking model)"]
+        GW --> O1
+    end
+
+    subgraph nodeA["Mesh Node A"]
+        O2["Ollama → Vision Model"]
+    end
+
+    subgraph nodeB["Mesh Node B"]
+        O3["Ollama → Fast Coder"]
+    end
+
+    subgraph nodeC["Mesh Node C"]
+        O4["Ollama → Embeddings"]
+    end
+
+    GW -->|"Tailscale\n(encrypted)"| O2
+    GW -->|"Tailscale\n(encrypted)"| O3
+    GW -->|"Tailscale\n(encrypted)"| O4
 ```
 
-**Setting up a new mesh node:**
-```bash
-# On any machine on your Tailnet:
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull <model-name>
-# That's it. Add the provider entry on the primary node.
-```
-
-**Example mesh roles:**
-
-| Role | Model | Hardware | Purpose |
-|------|-------|----------|---------|
-| Primary thinker | Qwen3-Coder-Next 80B | GB10 (128 GB) | Planning, complex code, debugging |
-| Fast coder | Qwen2.5-Coder 7B | Orin AGX (64 GB) | Quick edits, completions, tests |
-| Vision | LLaVA-Next | Any GPU | Screenshot analysis, UI review |
-| Embeddings | nomic-embed-text | Any CPU | Code search, RAG |
+See [docs/architecture.md](docs/architecture.md) for detailed diagrams and request flow.
+See [docs/mesh.md](docs/mesh.md) for multi-node setup instructions.
 
 ## Why Qwen3-Coder-Next?
 
-The default model was chosen because **it actually works as a coding agent.** Tool calling support through Ollama means it can read files, edit code, run commands, and debug — the full agentic loop.
+The default model was chosen because **it actually works as a coding agent.** Tool calling through Ollama means it can read files, edit code, run commands, and debug — the full agentic loop.
 
 | Model | Size | Tool Calling | Agent Mode | Speed |
 |-------|------|-------------|------------|-------|
@@ -159,136 +123,120 @@ The default model was chosen because **it actually works as a coding agent.** To
 | GPT-OSS 120B | ~65 GB | Yes | Full agent | Fast (5.1B active MoE) |
 | MiniMax-M2.5 229B | ~56 GB | No | Chat only | Slow |
 
-To use a different model, edit `OLLAMA_MODEL_NAME` in `.lib/common.sh` and update `.proxy/.env`.
-
-## Minimum System Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| RAM | 96 GB unified/shared | 128 GB+ unified/shared |
-| GPU | NVIDIA with 8 GB+ VRAM | NVIDIA with unified memory (GB10, Jetson) |
-| Disk | 120 GB free | 200 GB+ free |
-| OS | Linux (aarch64 or x86_64) | Ubuntu 24.04+ |
-| CPU | 8 cores | 12+ cores |
-
-### Tested Hardware
-
-| Device | RAM | Price Range | Fit |
-|--------|-----|-------------|-----|
-| **NVIDIA GB10** (Grace Blackwell) | 128 GB unified | ~$3,000 | Best value |
-| **NVIDIA Jetson AGX Thor** | 128 GB unified | ~$5,000+ | Excellent |
-| **Custom workstation** (RTX 5090 x2) | 128 GB+ | $8,000-$15,000 | Great |
-| **Apple Mac Studio** (M4 Ultra) | 192 GB unified | ~$8,000 | Use MLX quants |
-
-For multi-node setups, satellite machines can be much smaller (any machine that can run Ollama with your chosen model).
+To swap: edit `OLLAMA_MODEL_NAME` in `scripts/lib/common.sh` and `.proxy/.env`.
 
 ## Security
 
-Tritium Coder is hardened for **local coding work only**:
+```mermaid
+flowchart LR
+    subgraph allowed["Allowed"]
+        A1["Read/write local files"]
+        A2["Run allowlisted commands"]
+        A3["Web search (read-only)"]
+    end
 
-- **Localhost-only gateway** — not exposed on the network by default
-- **Token authentication** — all gateway access requires an auth token
-- **Allowlist shell execution** — commands must be explicitly approved before running
-- **No browser automation** — Playwright/Chrome automation is disabled
-- **No elevated permissions** — no sudo, no root access
-- **Web search enabled** — the agent can search docs for research, but cannot install software or modify the system
-- **Tailscale Serve** — optional HTTPS remote access through your private Tailnet (not the open internet)
+    subgraph blocked["Blocked"]
+        B1["Install software"]
+        B2["Browser automation"]
+        B3["Elevated permissions"]
+        B4["Remote network access"]
+    end
 
-See [USAGE.md](USAGE.md#security-model) for the full security breakdown.
+    Agent["Agent"] --> allowed
+    Agent -.->|"denied"| blocked
+```
+
+- **Localhost-only gateway** — not exposed on the network
+- **Token auth** — all gateway access requires authentication
+- **Exec allowlist** — commands must be explicitly approved
+- **No browser / no sudo / no remote access**
+- **Web search** — enabled for research, read-only
+
+See [docs/security.md](docs/security.md) for full details.
 
 ## File Structure
 
 ```
 tritium-coder/
-  install.sh          # One-click installer (run this first)
-  start.sh            # Start the AI stack (Ollama + proxy + gateway)
-  stop.sh             # Stop and free memory
-  run-claude.sh       # Launch Claude Code locally
-  run-openclaw.sh     # Launch OpenClaw agent locally
-  status.sh           # Check stack status
-  USAGE.md            # Practical workflows and examples
-  README.md           # This file
-  LICENSE             # MIT License
-  .lib/
-    common.sh         # Shared UI library
+  install.sh              # One-click installer
+  CLAUDE.md               # Project context for Claude Code
+  README.md               # This file
+  LICENSE                 # MIT
+  scripts/
+    start.sh              # Start the full stack
+    stop.sh               # Stop and free memory
+    status.sh             # Check what's running
+    run-claude.sh         # Launch Claude Code
+    run-openclaw.sh       # Launch OpenClaw agent
+    lib/
+      common.sh           # Shared bash library
   config/
-    openclaw.json     # OpenClaw hardened config
-  logs/               # Runtime logs
-  .proxy/             # Claude Code proxy (auto-cloned)
-  .openclaw/          # OpenClaw (auto-cloned)
+    openclaw.json         # Hardened OpenClaw config
+  tests/
+    run-all.sh            # Test suite (Tetris, Pong, Smash TV, etc.)
+  docs/
+    usage.md              # Detailed workflows and examples
+    architecture.md       # System architecture diagrams
+    security.md           # Security model
+    mesh.md               # Multi-node setup guide
 ```
 
-## Swapping Components
+## System Requirements
 
-**Different model:**
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| RAM | 96 GB unified/shared | 128 GB+ |
+| GPU | NVIDIA 8 GB+ VRAM | NVIDIA unified memory (GB10, Jetson) |
+| Disk | 120 GB free | 200 GB+ |
+| OS | Linux (aarch64 or x86_64) | Ubuntu 24.04+ |
+
+### Tested Hardware
+
+| Device | RAM | Price | Fit |
+|--------|-----|-------|-----|
+| **NVIDIA GB10** | 128 GB unified | ~$3,000 | Best value |
+| **Jetson AGX Thor** | 128 GB unified | ~$5,000+ | Excellent |
+| **RTX 5090 x2 workstation** | 128 GB+ | $8,000+ | Great |
+| **Mac Studio M4 Ultra** | 192 GB unified | ~$8,000 | Use MLX quants |
+
+## Testing
+
+Run the built-in test suite to validate the full stack:
+
 ```bash
-# Edit .lib/common.sh: change OLLAMA_MODEL_NAME
-# Edit .proxy/.env: change model slots
-# Then:
-ollama pull your-new-model
-./start.sh
+tests/run-all.sh              # Run all tests (todo app, REST API, Tetris, Pong, Smash TV)
+tests/run-all.sh tetris       # Run one test
+tests/run-all.sh pong         # Run one test
 ```
 
-**Different coding agent:** Replace `run-claude.sh` with your agent's launch script. As long as it talks to an OpenAI-compatible or Anthropic-compatible endpoint, it works.
-
-**Different model server:** Point the proxy's `OPENAI_BASE_URL` at your server. Ollama, vLLM, SGLang, LM Studio — they all speak OpenAI API.
-
-**Add a satellite node:**
-```bash
-# On the satellite machine:
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llava-next   # or whatever model you need
-# Then add the provider to config/openclaw.json on the main machine
-```
+Each test sends a real coding job to the agent, waits for output, and validates the generated code.
 
 ## Troubleshooting
 
-### Slow responses
+| Problem | Fix |
+|---------|-----|
+| Slow responses | Close other memory-heavy apps. Qwen3-Coder-Next is 80B MoE (3B active), so it's fast. |
+| Dashboard "secure context" error | Access via `http://localhost:18789`, not an IP. For remote: `tailscale serve 18789` |
+| Proxy won't start | `scripts/stop.sh && scripts/start.sh` |
+| Node < 22 | `curl -fsSL https://deb.nodesource.com/setup_22.x \| sudo -E bash - && sudo apt install -y nodejs` |
+| Download interrupted | Re-run `./install.sh` — resumes automatically |
 
-Qwen3-Coder-Next is an 80B MoE model (only 3B active per token). If responses are still slow, close other memory-heavy applications.
-
-### Proxy won't start
-
+**Logs:**
 ```bash
-ss -tlnp | grep 8082    # Check what's on the port
-./stop.sh               # Clean stop
-./start.sh              # Restart
+tail -f logs/ollama.log               # Ollama
+tail -f logs/proxy.log                # Proxy
+tail -f logs/openclaw-gateway.log     # Gateway
+openclaw logs --follow                # Agent
 ```
 
-### Dashboard "requires secure context" error
+## Documentation
 
-The browser needs HTTPS or localhost. Make sure you're accessing `http://localhost:18789`, not an IP address. For remote access, set up Tailscale Serve:
-```bash
-tailscale serve 18789
-```
-
-### OpenClaw says "Node >= 22 required"
-
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs
-```
-
-### Model download interrupted
-
-Re-run `./install.sh`. The download resumes from where it left off.
-
-### Logs
-
-```bash
-tail -f logs/ollama.log                # Ollama server
-tail -f logs/proxy.log                 # Claude Code proxy
-tail -f logs/openclaw-gateway.log      # OpenClaw gateway
-openclaw logs --follow                 # OpenClaw agent logs
-```
-
-## Uninstall
-
-```bash
-./stop.sh
-ollama rm qwen3-coder-next
-rm -rf ~/Code/tritium-coder
-```
+| Doc | Contents |
+|-----|----------|
+| [docs/usage.md](docs/usage.md) | Workflows, examples, tips |
+| [docs/architecture.md](docs/architecture.md) | System diagrams, request flow |
+| [docs/security.md](docs/security.md) | Security model, exec approvals |
+| [docs/mesh.md](docs/mesh.md) | Multi-node Tailscale setup |
 
 ## Credits
 

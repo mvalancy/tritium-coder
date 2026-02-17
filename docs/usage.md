@@ -9,12 +9,12 @@
 ## Quick Reference
 
 ```bash
-./start.sh          # Start the AI stack (Ollama + proxy + gateway)
-./run-claude.sh     # Launch Claude Code with local model (interactive terminal)
-./run-openclaw.sh   # Launch OpenClaw agent (interactive terminal)
+scripts/start.sh          # Start the AI stack (Ollama + proxy + gateway)
+scripts/run-claude.sh     # Launch Claude Code with local model (interactive terminal)
+scripts/run-openclaw.sh   # Launch OpenClaw agent (interactive terminal)
 openclaw dashboard  # Open the web dashboard (chat, config, approvals)
-./stop.sh           # Stop everything and free memory
-./status.sh         # Check what's running
+scripts/stop.sh           # Stop everything and free memory
+scripts/status.sh         # Check what's running
 ```
 
 ---
@@ -26,14 +26,14 @@ Claude Code is the primary coding interface. It provides an interactive terminal
 ### Start a session
 
 ```bash
-./start.sh           # Start Ollama + proxy (do this once)
-./run-claude.sh      # Launch Claude Code
+scripts/start.sh           # Start Ollama + proxy (do this once)
+scripts/run-claude.sh      # Launch Claude Code
 ```
 
 ### Point it at your project
 
 ```bash
-./run-claude.sh -p /path/to/your/project
+scripts/run-claude.sh -p /path/to/your/project
 ```
 
 Or just `cd` into your project first:
@@ -168,8 +168,8 @@ OpenClaw runs the model as an autonomous coding agent. You give it a job, it wri
 ### 1. Start the stack
 
 ```bash
-./start.sh             # Start Ollama (do this once)
-./run-openclaw.sh      # Start gateway + launch agent
+scripts/start.sh             # Start Ollama (do this once)
+scripts/run-openclaw.sh      # Start gateway + launch agent
 ```
 
 The script starts the OpenClaw gateway (port 18789) automatically if it isn't running, then drops you into an agent session.
@@ -179,13 +179,13 @@ The script starts the OpenClaw gateway (port 18789) automatically if it isn't ru
 **Interactive (default):** Just run the script and talk to it:
 
 ```bash
-./run-openclaw.sh
+scripts/run-openclaw.sh
 ```
 
 **One-shot:** Pass the task as an argument:
 
 ```bash
-./run-openclaw.sh "Build a Flask todo app with SQLite. Write it to /tmp/todo-app/app.py and tell me how to run it."
+scripts/run-openclaw.sh "Build a Flask todo app with SQLite. Write it to /tmp/todo-app/app.py and tell me how to run it."
 ```
 
 **Headless (background):** Run a job and capture JSON output:
@@ -264,7 +264,7 @@ python3 /tmp/todo-app/app.py
 
 ```bash
 # Give the job
-./run-openclaw.sh "Create a Python Flask todo app in /tmp/my-todo/. Include add, complete, and delete. Use SQLite. Then tell me the exact command to run it."
+scripts/run-openclaw.sh "Create a Python Flask todo app in /tmp/my-todo/. Include add, complete, and delete. Use SQLite. Then tell me the exact command to run it."
 
 # Agent works... writes files, reports back with run instructions
 
@@ -278,7 +278,7 @@ python3 /tmp/my-todo/app.py
 ### Example: Debug an existing project
 
 ```bash
-./run-openclaw.sh "Read /home/user/project/app.py. It crashes on startup with 'KeyError: db_url'. Find the bug and fix it."
+scripts/run-openclaw.sh "Read /home/user/project/app.py. It crashes on startup with 'KeyError: db_url'. Find the bug and fix it."
 ```
 
 ### Example: Scheduled tasks (cron)
@@ -340,7 +340,7 @@ Tritium Coder is configured for **local coding work only**. The OpenClaw config 
 
 ### Reviewing the config
 
-The security config lives at `config/openclaw.json` and is applied to `~/.openclaw/openclaw.json` during install and when running `./run-openclaw.sh`.
+The security config lives at `config/openclaw.json` and is applied to `~/.openclaw/openclaw.json` during install and when running `scripts/run-openclaw.sh`.
 
 To audit your current setup:
 
@@ -379,12 +379,12 @@ The model needs a few seconds to produce the first token. This is normal for lar
 
 ### Keep the model loaded
 
-After `./start.sh`, the model stays in memory. Don't run `./stop.sh` between sessions unless you need the RAM.
+After `scripts/start.sh`, the model stays in memory. Don't run `scripts/stop.sh` between sessions unless you need the RAM.
 
 ### Monitor resource usage
 
 ```bash
-./status.sh                          # Quick overview
+scripts/status.sh                          # Quick overview
 watch -n 2 nvidia-smi                # GPU utilization
 watch -n 2 free -h                   # Memory usage
 ```
@@ -430,18 +430,18 @@ watch -n 2 free -h                   # Memory usage
 The model may need more context. Try:
 - Adding a system prompt that specifies the task clearly
 - Reducing `num_ctx` if memory is tight
-- Checking `./status.sh` to verify the model is loaded
+- Checking `scripts/status.sh` to verify the model is loaded
 
 ### Proxy connection refused
 
 ```bash
-./status.sh               # Check if proxy is running
-./stop.sh && ./start.sh   # Restart everything
+scripts/status.sh               # Check if proxy is running
+scripts/stop.sh && scripts/start.sh   # Restart everything
 ```
 
 ### Out of memory
 
 ```bash
-./stop.sh                              # Free model memory
+scripts/stop.sh                              # Free model memory
 QUANT=UD-TQ1_0 ./install.sh           # Use a smaller quantization
 ```
