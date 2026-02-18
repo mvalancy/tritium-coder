@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 # =============================================================================
 #  Tritium Coder  |  Stack Status
@@ -9,23 +9,41 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# --- Help ---
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    banner
+    echo -e "  ${BOLD}./status${RST} — Show stack status, resources, and access info"
+    echo ""
+    echo -e "  Checks which services are running, shows system resources (memory,"
+    echo -e "  disk, GPU), lists local and Tailscale access URLs, and prints"
+    echo -e "  quick commands for controlling the stack and submitting jobs."
+    echo ""
+    echo -e "  ${BOLD}Usage:${RST}  ./status"
+    echo ""
+    echo -e "  ${BOLD}See also:${RST}  ./start, ./stop, ./dashboard"
+    echo ""
+    exit 0
+fi
+
 banner
+echo -e "  ${DIM}Service health, system resources, access URLs, and quick commands.${RST}"
+echo ""
 
 section "Service Status"
 
 # --- Ollama Server ---
-if curl -s http://localhost:11434/api/tags &>/dev/null; then
+if curl_check http://localhost:11434/api/tags &>/dev/null; then
     log_ok "Ollama server       ${BGRN}running${RST}  ${DIM}http://localhost:11434${RST}"
 else
     log_fail "Ollama server       ${RED}stopped${RST}"
 fi
 
 # --- Model loaded ---
-LOADED=$(curl -s http://localhost:11434/api/ps 2>/dev/null | grep -o "\"$OLLAMA_MODEL_NAME" || echo "")
+LOADED=$(curl_check http://localhost:11434/api/ps 2>/dev/null | grep -o "\"$OLLAMA_MODEL_NAME" || echo "")
 if [ -n "$LOADED" ]; then
     log_ok "Model               ${BGRN}loaded${RST}   ${DIM}${OLLAMA_MODEL_NAME}${RST}"
 else
-    if ollama list 2>/dev/null | grep -q "$OLLAMA_MODEL_NAME"; then
+    if ollama_has_model "$OLLAMA_MODEL_NAME"; then
         log_warn "Model               ${YLW}available (not loaded)${RST}  ${DIM}${OLLAMA_MODEL_NAME}${RST}"
     else
         log_fail "Model               ${RED}not installed${RST}  ${DIM}${OLLAMA_MODEL_NAME}${RST}"
@@ -40,12 +58,18 @@ else
 fi
 
 # --- OpenClaw Gateway ---
-GATEWAY_PORT=18789
 if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
     log_ok "OpenClaw gateway    ${BGRN}running${RST}  ${DIM}http://localhost:${GATEWAY_PORT}${RST}"
-    log_info "Dashboard           ${DIM}openclaw dashboard${RST}"
+    log_info "Chat dashboard      ${DIM}openclaw dashboard${RST}"
 else
     log_fail "OpenClaw gateway    ${RED}stopped${RST}"
+fi
+
+# --- Control Panel ---
+if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
+    log_ok "Control panel       ${BGRN}running${RST}  ${DIM}http://localhost:${PANEL_PORT}${RST}"
+else
+    log_warn "Control panel       ${YLW}stopped${RST}  ${DIM}(start with: ./dashboard)${RST}"
 fi
 
 section "System Resources"
@@ -64,6 +88,69 @@ log_info "Disk:   ${BOLD}${DISK_USED}${RST}${DIM} used / ${DISK_AVAIL} available
 # --- GPU ---
 GPU_INFO=$(nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader 2>/dev/null || echo "N/A")
 log_info "GPU:    ${DIM}${GPU_INFO}${RST}"
+
+section "Access"
+
+# --- Local URLs ---
+if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
+    log_info "Control panel       ${CYN}http://localhost:${PANEL_PORT}${RST}"
+else
+    log_info "Control panel       ${DIM}not running${RST}  ${DIM}(start with: ./dashboard)${RST}"
+fi
+if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+    log_info "Chat dashboard      ${CYN}http://localhost:${GATEWAY_PORT}/#token=tritium-local-dev${RST}"
+fi
+log_info "Ollama API          ${CYN}http://localhost:11434${RST}"
+log_info "Proxy API           ${CYN}http://localhost:${PROXY_PORT}${RST}"
+
+# --- Tailscale ---
+if command -v tailscale &>/dev/null; then
+    TS_STATUS=$(tailscale status --json 2>/dev/null)
+    if [ $? -eq 0 ] && [ -n "$TS_STATUS" ]; then
+        TS_NAME=$(echo "$TS_STATUS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || echo "")
+        TS_IP=$(echo "$TS_STATUS" | python3 -c "import sys,json; d=json.load(sys.stdin); ips=d.get('TailscaleIPs',[]); print(ips[0] if ips else '')" 2>/dev/null || echo "")
+        TS_ONLINE=$(echo "$TS_STATUS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Self',{}).get('Online',False))" 2>/dev/null || echo "")
+
+        if [ "$TS_ONLINE" = "True" ] && [ -n "$TS_NAME" ]; then
+            echo ""
+            log_ok "Tailscale           ${BGRN}online${RST}  ${DIM}${TS_NAME}${RST}"
+            [ -n "$TS_IP" ] && log_info "Tailscale IP        ${CYN}${TS_IP}${RST}"
+            log_info "Remote panel        ${CYN}http://${TS_NAME}:${PANEL_PORT}${RST}"
+            if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+                log_info "Remote chat         ${CYN}http://${TS_NAME}:${GATEWAY_PORT}/#token=tritium-local-dev${RST}"
+            fi
+        else
+            log_warn "Tailscale           ${YLW}installed but offline${RST}"
+        fi
+    else
+        log_warn "Tailscale           ${YLW}installed but not connected${RST}"
+    fi
+else
+    log_info "Tailscale           ${DIM}not installed${RST}  ${DIM}(install for remote access)${RST}"
+fi
+
+section "Quick Commands"
+
+log_info "Start stack         ${BOLD}./start${RST}"
+log_info "Stop stack          ${BOLD}./stop${RST}"
+log_info "Control panel       ${BOLD}./dashboard${RST}"
+log_info "Chat dashboard      ${BOLD}openclaw dashboard${RST}"
+log_info "Run tests           ${BOLD}./test${RST}"
+echo ""
+log_info "Claude Code session ${BOLD}scripts/run-claude.sh${RST}"
+log_info "  (in a project)    ${BOLD}scripts/run-claude.sh -p /path/to/project${RST}"
+log_info "OpenClaw agent      ${BOLD}scripts/run-openclaw.sh${RST}"
+echo ""
+log_info "Tail logs           ${BOLD}tail -f logs/openclaw-gateway.log${RST}"
+log_info "                    ${BOLD}openclaw logs --follow${RST}"
+
+section "Submit Jobs"
+
+log_info "Interactive chat    ${BOLD}scripts/run-openclaw.sh${RST}"
+log_info "One-shot job        ${BOLD}scripts/run-openclaw.sh \"Build a Flask app in /tmp/myapp\"${RST}"
+log_info "Headless (JSON)     ${BOLD}openclaw agent --message \"your task\" --json --timeout 600${RST}"
+log_info "Web chat            Open the ${CYN}Chat Dashboard${RST} link above"
+log_info "API (curl)          ${DIM}See docs/usage.md for direct API examples${RST}"
 
 section "Installed Components"
 

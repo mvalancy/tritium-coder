@@ -15,70 +15,96 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/scripts/lib/common.sh"
 
+# --- Help ---
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    banner
+    echo -e "  ${BOLD}./install.sh${RST} — Install the full Tritium Coder stack"
+    echo ""
+    echo -e "  Downloads and configures Ollama, the Claude Code proxy, and OpenClaw."
+    echo -e "  Pulls the default model (~50 GB). Safe to re-run — already-installed"
+    echo -e "  components are skipped."
+    echo ""
+    echo -e "  ${BOLD}Usage:${RST}  ./install.sh"
+    echo ""
+    echo -e "  ${BOLD}Requires:${RST}  Python 3 (must be pre-installed)"
+    echo -e "  ${BOLD}May install:${RST}  Ollama, Node.js 22, pnpm, python3-venv, pip, git"
+    echo ""
+    echo -e "  ${BOLD}After install:${RST}"
+    echo -e "    ${CYN}./start${RST}       Start the stack"
+    echo -e "    ${CYN}./dashboard${RST}   Open control panel"
+    echo -e "    ${CYN}./status${RST}      Check status"
+    echo ""
+    exit 0
+fi
+
 banner
 
 echo -e "  ${DIM}Model: ${RST}${BOLD}${OLLAMA_MODEL_NAME}${RST}  ${DIM}(~50 GB download)${RST}"
 echo ""
 
-ensure_dir "$MODEL_DIR"
 ensure_dir "$LOG_DIR"
 ensure_dir "$CONFIG_DIR"
 
 # =========================================================================
-#  PHASE 1: System Dependencies
+#  PREFLIGHT: Check what's installed and what's missing
 # =========================================================================
-section "Phase 1/4 : System Dependencies"
+section "Checking Requirements"
 
-# --- Ollama ---
-if require_cmd ollama; then
-    OLLAMA_VER=$(ollama --version 2>/dev/null | grep -oP '[\d.]+' | head -1)
-    log_ok "Ollama ${DIM}v${OLLAMA_VER}${RST}"
-else
-    log_run "Installing Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh >> "$LOG_DIR/ollama-install.log" 2>&1
-    if require_cmd ollama; then
-        log_ok "Ollama installed"
-    else
-        log_fail "Ollama installation failed. See $LOG_DIR/ollama-install.log"
-        exit 1
-    fi
-fi
+NEED_SUDO=false
+MISSING_APT=()
+NEED_OLLAMA=false
+NEED_NODE=false
+HAS_PYTHON=false
+CAN_INSTALL_OPENCLAW=true
 
-# --- Python 3 ---
+# --- Python 3 (hard requirement, can't auto-install reliably) ---
 if require_cmd python3; then
     PY_VER=$(python3 --version 2>/dev/null | awk '{print $2}')
     log_ok "Python ${DIM}v${PY_VER}${RST}"
+    HAS_PYTHON=true
 else
-    log_fail "Python 3 is required but not found."
-    log_info "Install: sudo apt install python3 python3-pip python3-venv"
-    exit 1
+    log_fail "Python 3 ${RED}not found${RST}"
 fi
 
-# --- python3-venv (needed for venv creation) ---
-if python3 -m venv --help &>/dev/null; then
+# --- python3-venv ---
+if [ "$HAS_PYTHON" = true ] && python3 -m venv --help &>/dev/null; then
     log_ok "Python venv module"
 else
-    log_run "Installing python3-venv..."
-    sudo apt-get install -y python3-venv >> "$LOG_DIR/deps-install.log" 2>&1
-    log_ok "Python venv module installed"
+    if [ "$HAS_PYTHON" = true ]; then
+        log_warn "python3-venv ${YLW}not installed${RST}"
+        MISSING_APT+=("python3-venv")
+        NEED_SUDO=true
+    fi
 fi
 
 # --- pip ---
-if python3 -m pip --version &>/dev/null; then
+if [ "$HAS_PYTHON" = true ] && python3 -m pip --version &>/dev/null; then
     log_ok "pip"
 else
-    log_run "Installing pip..."
-    sudo apt-get install -y python3-pip >> "$LOG_DIR/deps-install.log" 2>&1
-    log_ok "pip installed"
+    if [ "$HAS_PYTHON" = true ]; then
+        log_warn "pip ${YLW}not installed${RST}"
+        MISSING_APT+=("python3-pip")
+        NEED_SUDO=true
+    fi
 fi
 
 # --- Git ---
 if require_cmd git; then
     log_ok "Git"
 else
-    log_run "Installing git..."
-    sudo apt-get install -y git >> "$LOG_DIR/deps-install.log" 2>&1
-    log_ok "Git installed"
+    log_warn "Git ${YLW}not installed${RST}"
+    MISSING_APT+=("git")
+    NEED_SUDO=true
+fi
+
+# --- Ollama ---
+if require_cmd ollama; then
+    OLLAMA_VER=$(ollama --version 2>/dev/null | grep -oP '[\d.]+' | head -1)
+    log_ok "Ollama ${DIM}v${OLLAMA_VER}${RST}"
+else
+    log_warn "Ollama ${YLW}not installed${RST}"
+    NEED_OLLAMA=true
+    NEED_SUDO=true
 fi
 
 # --- Node.js (>= 22 for OpenClaw) ---
@@ -86,16 +112,24 @@ NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1 || echo "0
 if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
     log_ok "Node.js ${DIM}v$(node --version 2>/dev/null)${RST}"
 else
-    log_warn "Node.js v${NODE_VERSION} found, but OpenClaw requires v22+"
-    if ask_yn "Install Node.js 22 via NodeSource?"; then
-        log_run "Adding NodeSource repo and installing Node.js 22..."
-        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >> "$LOG_DIR/node-install.log" 2>&1
-        sudo apt-get install -y nodejs >> "$LOG_DIR/node-install.log" 2>&1
-        NEW_NODE=$(node --version 2>/dev/null || echo "unknown")
-        log_ok "Node.js upgraded to ${DIM}${NEW_NODE}${RST}"
+    if [ "$NODE_VERSION" -gt 0 ] 2>/dev/null; then
+        log_warn "Node.js ${YLW}v${NODE_VERSION} (need v22+ for OpenClaw)${RST}"
     else
-        log_warn "Skipping Node.js upgrade. OpenClaw will not work without Node >= 22."
-        log_info "Claude Code local mode will still work fine."
+        log_warn "Node.js ${YLW}not installed (need v22+ for OpenClaw)${RST}"
+    fi
+    NEED_NODE=true
+    NEED_SUDO=true
+fi
+
+# --- pnpm ---
+if require_cmd pnpm; then
+    log_ok "pnpm"
+else
+    if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
+        log_warn "pnpm ${YLW}not installed${RST}"
+        NEED_SUDO=true
+    else
+        log_skip "pnpm (needs Node.js 22+)"
     fi
 fi
 
@@ -103,10 +137,104 @@ fi
 if require_cmd claude; then
     log_ok "Claude Code CLI"
 else
-    log_warn "Claude Code CLI not found."
-    log_info "Install: npm install -g @anthropic-ai/claude-code"
-    log_info "Continuing without it (you can install later)."
+    log_info "Claude Code CLI ${DIM}not installed (optional, install later with: npm i -g @anthropic-ai/claude-code)${RST}"
 fi
+
+# =========================================================================
+#  STOP if Python is missing — can't auto-install this reliably
+# =========================================================================
+if [ "$HAS_PYTHON" = false ]; then
+    echo ""
+    log_fail "Python 3 is required and must be installed manually."
+    log_info "  Ubuntu/Debian:  ${BOLD}sudo apt install python3 python3-pip python3-venv${RST}"
+    log_info "  Then re-run:    ${BOLD}./install.sh${RST}"
+    exit 1
+fi
+
+# =========================================================================
+#  ASK before proceeding if sudo is needed
+# =========================================================================
+if [ "$NEED_SUDO" = true ]; then
+    section "Installation Plan"
+
+    log_info "The following will be installed:"
+    [ "$NEED_OLLAMA" = true ] && log_info "  ${BOLD}Ollama${RST}          ${DIM}Model server (curl installer, uses sudo)${RST}"
+    [ ${#MISSING_APT[@]} -gt 0 ] && log_info "  ${BOLD}${MISSING_APT[*]}${RST}  ${DIM}(apt-get)${RST}"
+    [ "$NEED_NODE" = true ] && log_info "  ${BOLD}Node.js 22${RST}      ${DIM}Runtime for OpenClaw (NodeSource repo + apt)${RST}"
+    if [ "$NEED_NODE" = false ] && ! require_cmd pnpm; then
+        log_info "  ${BOLD}pnpm${RST}            ${DIM}Package manager for OpenClaw (npm -g)${RST}"
+    fi
+    echo ""
+
+    # Check if sudo is available at all
+    if ! command -v sudo &>/dev/null; then
+        log_fail "sudo is not available on this system."
+        log_info "Install the packages listed above manually, then re-run this script."
+        exit 1
+    fi
+
+    if ! ask_yn "Proceed?"; then
+        log_info "Aborted. Install the packages above manually, then re-run."
+        exit 0
+    fi
+
+    # Verify sudo actually works (this prompts for password once)
+    if ! sudo true; then
+        log_fail "Could not get sudo access."
+        exit 1
+    fi
+fi
+
+# =========================================================================
+#  PHASE 1: Install missing system dependencies
+# =========================================================================
+section "Phase 1/4 : System Dependencies"
+
+# --- apt packages ---
+if [ ${#MISSING_APT[@]} -gt 0 ]; then
+    log_run "Updating package lists..."
+    sudo apt-get update -qq >> "$LOG_DIR/deps-install.log" 2>&1
+    log_run "Installing ${MISSING_APT[*]}..."
+    sudo apt-get install -y "${MISSING_APT[@]}" >> "$LOG_DIR/deps-install.log" 2>&1
+    log_ok "Installed ${MISSING_APT[*]}"
+fi
+
+# --- Ollama ---
+if [ "$NEED_OLLAMA" = true ]; then
+    log_run "Installing Ollama..."
+    curl -fsSL https://ollama.com/install.sh | sudo sh
+    if require_cmd ollama; then
+        log_ok "Ollama installed"
+    else
+        log_fail "Ollama installation failed."
+        exit 1
+    fi
+else
+    log_ok "Ollama"
+fi
+
+# --- Node.js 22 ---
+if [ "$NEED_NODE" = true ]; then
+    log_run "Installing Node.js 22 via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >> "$LOG_DIR/node-install.log" 2>&1
+    sudo apt-get install -y nodejs >> "$LOG_DIR/node-install.log" 2>&1
+    NEW_NODE=$(node --version 2>/dev/null || echo "unknown")
+    log_ok "Node.js ${DIM}${NEW_NODE}${RST}"
+    NODE_VERSION=$(echo "$NEW_NODE" | sed 's/v//' | cut -d. -f1 || echo "0")
+else
+    log_ok "Node.js"
+fi
+
+# --- pnpm ---
+if ! require_cmd pnpm && [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
+    log_run "Installing pnpm..."
+    sudo npm install -g pnpm >> "$LOG_DIR/openclaw-install.log" 2>&1
+    log_ok "pnpm installed"
+else
+    require_cmd pnpm && log_ok "pnpm"
+fi
+
+log_ok "All dependencies ready"
 
 # =========================================================================
 #  PHASE 2: Download & Install Model via Ollama
@@ -114,11 +242,11 @@ fi
 section "Phase 2/4 : Download Model (${OLLAMA_MODEL_NAME})"
 
 # Ensure Ollama is running
-if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+if ! curl_check http://localhost:11434/api/tags &>/dev/null; then
     log_run "Starting Ollama server..."
     ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
     sleep 3
-    if curl -s http://localhost:11434/api/tags &>/dev/null; then
+    if curl_check http://localhost:11434/api/tags &>/dev/null; then
         log_ok "Ollama server started"
     else
         log_fail "Could not start Ollama server. Check $LOG_DIR/ollama.log"
@@ -129,8 +257,8 @@ else
 fi
 
 # Pull model (Ollama handles download, caching, and resume)
-if ollama list 2>/dev/null | grep -q "$OLLAMA_MODEL_NAME"; then
-    MODEL_SIZE=$(ollama list 2>/dev/null | grep "$OLLAMA_MODEL_NAME" | awk '{print $3, $4}')
+if ollama_has_model "$OLLAMA_MODEL_NAME"; then
+    MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
     log_ok "Model '${OLLAMA_MODEL_NAME}' already installed ${DIM}(${MODEL_SIZE})${RST}"
 else
     log_run "Pulling ${OLLAMA_MODEL_NAME} from Ollama registry..."
@@ -141,8 +269,8 @@ else
         echo -e "         ${DIM}${line}${RST}"
     done
 
-    if ollama list 2>/dev/null | grep -q "$OLLAMA_MODEL_NAME"; then
-        MODEL_SIZE=$(ollama list 2>/dev/null | grep "$OLLAMA_MODEL_NAME" | awk '{print $3, $4}')
+    if ollama_has_model "$OLLAMA_MODEL_NAME"; then
+        MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
         log_ok "Model installed ${DIM}(${MODEL_SIZE})${RST}"
     else
         log_fail "Failed to pull model '${OLLAMA_MODEL_NAME}'"
@@ -151,7 +279,7 @@ else
 fi
 
 # =========================================================================
-#  PHASE 4: Claude Code Proxy
+#  PHASE 3: Claude Code Proxy
 # =========================================================================
 section "Phase 3/4 : Claude Code Proxy"
 
@@ -193,29 +321,16 @@ ENVEOF
 log_ok "Proxy configured ${DIM}(port ${PROXY_PORT})${RST}"
 
 # =========================================================================
-#  PHASE 5: OpenClaw (cloned locally for reference + use)
+#  PHASE 4: OpenClaw
 # =========================================================================
 section "Phase 4/4 : OpenClaw"
 
 OPENCLAW_DIR="$PROJECT_DIR/.openclaw"
 
-NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1 || echo "0")
 if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
-    log_ok "Node.js ${DIM}v$(node --version)${RST}"
-
-    # --- pnpm (needed for OpenClaw build) ---
-    if ! require_cmd pnpm; then
-        log_run "Installing pnpm..."
-        sudo npm install -g pnpm >> "$LOG_DIR/openclaw-install.log" 2>&1
-        log_ok "pnpm installed"
-    else
-        log_ok "pnpm"
-    fi
-
     # --- Clone OpenClaw repo ---
     if [ -d "$OPENCLAW_DIR/.git" ]; then
         log_ok "OpenClaw repo already cloned"
-        log_info "$OPENCLAW_DIR"
     else
         log_run "Cloning OpenClaw repo..."
         rm -rf "$OPENCLAW_DIR"
@@ -263,9 +378,11 @@ if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
     # Apply hardened OpenClaw config
     if [ -f "$CONFIG_DIR/openclaw.json" ]; then
         mkdir -p "$HOME/.openclaw"
-        cp "$CONFIG_DIR/openclaw.json" "$HOME/.openclaw/openclaw.json"
-        log_ok "Hardened config applied to ${DIM}~/.openclaw/openclaw.json${RST}"
-        log_info "Security: no browser, exec allowlist, local filesystem, loopback only"
+        GW_BIND=$(get_gateway_bind)
+        sed -e "s/qwen3-coder-next/${OLLAMA_MODEL_NAME}/g" \
+            -e "s/\"bind\": \"loopback\"/\"bind\": \"${GW_BIND}\"/" \
+            "$CONFIG_DIR/openclaw.json" > "$HOME/.openclaw/openclaw.json"
+        log_ok "Hardened config applied to ${DIM}~/.openclaw/openclaw.json${RST} ${DIM}(model: ${OLLAMA_MODEL_NAME})${RST}"
     else
         log_warn "config/openclaw.json not found — skipping config"
     fi
@@ -283,7 +400,7 @@ if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
         log_ok "Control UI already built"
     fi
 else
-    log_warn "Node.js < 22 -- skipping OpenClaw"
+    log_warn "Node.js < 22 — skipping OpenClaw"
     log_info "Install Node 22+, then re-run this script."
 fi
 
@@ -299,10 +416,11 @@ echo -e "  ${BOLD}Model:${RST}     ${OLLAMA_MODEL_NAME}"
 echo -e "  ${BOLD}Features:${RST}  Tool calling, code generation, debugging"
 echo ""
 echo -e "  ${BOLD}Quick Start:${RST}"
-echo -e "    ${CYN}./start.sh${RST}            Start the full stack (Ollama + proxy + gateway)"
-echo -e "    ${CYN}openclaw dashboard${RST}    Open web dashboard"
-echo -e "    ${CYN}./run-openclaw.sh${RST}     Launch terminal agent"
-echo -e "    ${CYN}./run-claude.sh${RST}       Launch Claude Code (local)"
-echo -e "    ${CYN}./stop.sh${RST}             Stop everything"
-echo -e "    ${CYN}./status.sh${RST}           Check stack status"
+echo -e "    ${CYN}./start${RST}               Start the full stack (Ollama + proxy + gateway)"
+echo -e "    ${CYN}./dashboard${RST}           Open control panel"
+echo -e "    ${CYN}openclaw dashboard${RST}    Open chat dashboard"
+echo -e "    ${CYN}scripts/run-openclaw.sh${RST}  Launch terminal agent"
+echo -e "    ${CYN}scripts/run-claude.sh${RST}    Launch Claude Code (local)"
+echo -e "    ${CYN}./stop${RST}                Stop everything"
+echo -e "    ${CYN}./status${RST}              Check stack status"
 echo ""
