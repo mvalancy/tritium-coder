@@ -15,36 +15,158 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/scripts/lib/common.sh"
 
-# --- Help ---
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    banner
-    echo -e "  ${BOLD}./install.sh${RST} — Install the full Tritium Coder stack"
-    echo ""
-    echo -e "  Downloads and configures Ollama, the Claude Code proxy, and OpenClaw."
-    echo -e "  Pulls the default model (~50 GB). Safe to re-run — already-installed"
-    echo -e "  components are skipped."
-    echo ""
-    echo -e "  ${BOLD}Usage:${RST}  ./install.sh"
-    echo ""
-    echo -e "  ${BOLD}Requires:${RST}  Python 3 (must be pre-installed)"
-    echo -e "  ${BOLD}May install:${RST}  Ollama, Node.js 22, pnpm, python3-venv, pip, git"
-    echo ""
-    echo -e "  ${BOLD}After install:${RST}"
-    echo -e "    ${CYN}./start${RST}       Start the stack"
-    echo -e "    ${CYN}./dashboard${RST}   Open control panel"
-    echo -e "    ${CYN}./status${RST}      Check status"
-    echo ""
-    exit 0
+# --- Parse arguments ---
+REMOTE_MODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --remote) REMOTE_MODE=true ;;
+        --help|-h)
+            banner
+            echo -e "  ${BOLD}./install.sh${RST} — Install the full Tritium Coder stack"
+            echo ""
+            echo -e "  Downloads and configures Ollama, the Claude Code proxy, and OpenClaw."
+            echo -e "  Pulls the default model (~50 GB). Safe to re-run — already-installed"
+            echo -e "  components are skipped."
+            echo ""
+            echo -e "  ${BOLD}Usage:${RST}  ./install.sh [--remote]"
+            echo ""
+            echo -e "  ${BOLD}Options:${RST}"
+            echo -e "    ${CYN}--remote${RST}     Skip local model download; use a remote Ollama server"
+            echo -e "                 Set ${BOLD}OLLAMA_HOST${RST} to the remote URL first."
+            echo ""
+            echo -e "  ${BOLD}Environment:${RST}"
+            echo -e "    ${CYN}OLLAMA_HOST${RST}  Remote Ollama URL (e.g. http://100.x.x.x:11434)"
+            echo -e "    ${CYN}QUANT${RST}        Quantization tag to append (e.g. QUANT=UD-TQ1_0)"
+            echo ""
+            echo -e "  ${BOLD}Requires:${RST}  Python 3 (must be pre-installed)"
+            echo -e "  ${BOLD}May install:${RST}  Ollama, Node.js 22, pnpm, python3-venv, pip, git"
+            echo ""
+            echo -e "  ${BOLD}After install:${RST}"
+            echo -e "    ${CYN}./start${RST}       Start the stack"
+            echo -e "    ${CYN}./dashboard${RST}   Open control panel"
+            echo -e "    ${CYN}./status${RST}      Check status"
+            echo ""
+            exit 0
+            ;;
+    esac
+done
+
+# --- Quantization tag ---
+if [ -n "${QUANT:-}" ]; then
+    OLLAMA_MODEL_NAME="${OLLAMA_MODEL_NAME}:${QUANT}"
 fi
 
 banner
 tlog "--- install.sh started ---"
 
-echo -e "  ${DIM}Model: ${RST}${BOLD}${OLLAMA_MODEL_NAME}${RST}  ${DIM}(~50 GB download)${RST}"
+if [ "$REMOTE_MODE" = true ]; then
+    echo -e "  ${DIM}Mode:  ${RST}${BOLD}Remote${RST}  ${DIM}(model served by ${OLLAMA_HOST:-\$OLLAMA_HOST not set})${RST}"
+else
+    echo -e "  ${DIM}Model: ${RST}${BOLD}${OLLAMA_MODEL_NAME}${RST}  ${DIM}(~50 GB download)${RST}"
+fi
 echo ""
 
 ensure_dir "$LOG_DIR"
 ensure_dir "$CONFIG_DIR"
+
+# =========================================================================
+#  PREFLIGHT: Hardware checks
+# =========================================================================
+section "Hardware Check"
+
+HW_RAM=$(detect_ram_gb)
+HW_GPU=$(detect_gpu_name)
+HW_VRAM=$(detect_vram_mb)
+HW_UNIFIED=$(detect_unified_memory)
+HW_AVAIL=$(detect_available_memory_gb)
+HW_TIER=$(detect_hw_tier)
+HW_DISK=$(detect_disk_gb)
+
+log_info "RAM:       ${BOLD}${HW_RAM} GB${RST}"
+if [ -n "$HW_GPU" ]; then
+    log_info "GPU:       ${BOLD}${HW_GPU}${RST}"
+    log_info "VRAM:      ${BOLD}$(( HW_VRAM / 1024 )) GB${RST} ${DIM}(${HW_VRAM} MB)${RST}"
+    if [ "$HW_UNIFIED" = "true" ]; then
+        log_info "Memory:    ${BOLD}${HW_AVAIL} GB unified${RST}"
+    else
+        log_info "Memory:    ${BOLD}${HW_AVAIL} GB VRAM${RST} ${DIM}(discrete GPU)${RST}"
+    fi
+else
+    log_info "GPU:       ${DIM}None detected (no nvidia-smi)${RST}"
+    log_info "Memory:    ${BOLD}${HW_RAM} GB RAM only${RST}"
+fi
+log_info "Disk free: ${BOLD}${HW_DISK} GB${RST}"
+log_info "Tier:      ${BOLD}${HW_TIER}${RST}"
+
+# --- Disk space gate ---
+if [ "$HW_DISK" -lt 60 ] 2>/dev/null; then
+    echo ""
+    log_fail "Not enough disk space."
+    log_info "The model alone is ~50 GB. You have ${BOLD}${HW_DISK} GB${RST} free."
+    log_info "Free up space or use ${CYN}--remote${RST} mode to skip the download."
+    exit 1
+elif [ "$HW_DISK" -lt 80 ] 2>/dev/null && [ "$REMOTE_MODE" = false ]; then
+    echo ""
+    log_warn "Disk space is tight (${HW_DISK} GB free). The model is ~50 GB."
+    if ! ask_yn "Continue anyway?" "n"; then
+        log_info "Aborted. Free up disk space or use ${CYN}./install.sh --remote${RST}."
+        exit 0
+    fi
+fi
+
+# --- Memory/GPU gate (skip if remote mode) ---
+if [ "$REMOTE_MODE" = false ]; then
+    case "$HW_TIER" in
+        insufficient)
+            echo ""
+            echo -e "  ${BRED}+--------------------------------------------------------------+"
+            echo -e "  |  Hardware does not meet minimum requirements                 |"
+            echo -e "  +--------------------------------------------------------------+${RST}"
+            echo ""
+            log_fail "Available memory: ${BOLD}${HW_AVAIL} GB${RST} — need at least 16 GB GPU memory."
+            echo ""
+            log_info "The default model (${OLLAMA_MODEL_NAME}) requires ~50 GB and won't fit."
+            echo ""
+            log_info "${BOLD}Options:${RST}"
+            log_info "  1. ${CYN}Remote mode${RST} — offload inference to a GPU server over Tailscale:"
+            log_info "     ${BOLD}OLLAMA_HOST=http://<gpu-server>:11434 ./install.sh --remote${RST}"
+            log_info "  2. ${CYN}Smaller quant${RST} — use a heavily quantized model (lower quality):"
+            log_info "     ${BOLD}QUANT=UD-TQ1_0 ./install.sh${RST}"
+            echo ""
+            if ! ask_yn "Install anyway? (model download will likely fail)" "n"; then
+                exit 0
+            fi
+            ;;
+        low)
+            echo ""
+            log_warn "Available memory: ${BOLD}${HW_AVAIL} GB${RST} — the default model (~50 GB) won't fit."
+            echo ""
+            log_info "${BOLD}Options:${RST}"
+            log_info "  1. ${CYN}Remote mode${RST} — offload inference to a GPU server:"
+            log_info "     ${BOLD}OLLAMA_HOST=http://<gpu-server>:11434 ./install.sh --remote${RST}"
+            log_info "  2. ${CYN}Smaller quant${RST} — try a quantized model:"
+            log_info "     ${BOLD}QUANT=UD-TQ1_0 ./install.sh${RST}"
+            log_info "  3. ${CYN}Mesh node${RST} — join another machine's agent mesh"
+            echo ""
+            if ! ask_yn "Install anyway?" "n"; then
+                exit 0
+            fi
+            ;;
+        mid)
+            echo ""
+            log_warn "Available memory: ${BOLD}${HW_AVAIL} GB${RST} — model will fit but it'll be tight."
+            log_info "Consider adding this machine as a mesh node for a larger setup."
+            echo ""
+            if ! ask_yn "Continue?" "y"; then
+                exit 0
+            fi
+            ;;
+        full)
+            echo ""
+            log_ok "Hardware looks good — ${BOLD}${HW_AVAIL} GB${RST} available"
+            ;;
+    esac
+fi
 
 # =========================================================================
 #  PREFLIGHT: Check what's installed and what's missing
@@ -240,43 +362,66 @@ log_ok "All dependencies ready"
 # =========================================================================
 #  PHASE 2: Download & Install Model via Ollama
 # =========================================================================
-section "Phase 2/4 : Download Model (${OLLAMA_MODEL_NAME})"
 
-# Ensure Ollama is running
-if ! curl_check http://localhost:11434/api/tags &>/dev/null; then
-    log_run "Starting Ollama server..."
-    ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
-    sleep 3
-    if curl_check http://localhost:11434/api/tags &>/dev/null; then
-        log_ok "Ollama server started"
-    else
-        log_fail "Could not start Ollama server. Check $LOG_DIR/ollama.log"
+if [ "$REMOTE_MODE" = true ]; then
+    section "Phase 2/4 : Remote Ollama Setup"
+
+    OLLAMA_URL=$(get_ollama_url)
+    if [ "$OLLAMA_URL" = "http://localhost:11434" ] && [ -z "${OLLAMA_HOST:-}" ]; then
+        log_fail "Remote mode requires OLLAMA_HOST to be set."
+        log_info "Example: ${BOLD}OLLAMA_HOST=http://100.x.x.x:11434 ./install.sh --remote${RST}"
         exit 1
     fi
-else
-    log_ok "Ollama server running"
-fi
 
-# Pull model (Ollama handles download, caching, and resume)
-if ollama_has_model "$OLLAMA_MODEL_NAME"; then
-    MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
-    log_ok "Model '${OLLAMA_MODEL_NAME}' already installed ${DIM}(${MODEL_SIZE})${RST}"
-else
-    timer_start
-    log_run "Pulling ${OLLAMA_MODEL_NAME} from Ollama registry..."
-    log_info "This is a ~50 GB download. Progress will appear below."
-    log_info "The download resumes if interrupted."
-    echo ""
-    ollama pull "$OLLAMA_MODEL_NAME" 2>&1 | while IFS= read -r line; do
-        echo -e "         ${DIM}${line}${RST}"
-    done
+    log_run "Checking remote Ollama at ${OLLAMA_URL}..."
+    if curl_check "$OLLAMA_URL/api/tags" &>/dev/null; then
+        log_ok "Remote Ollama is reachable at ${OLLAMA_URL}"
+    else
+        log_fail "Cannot reach Ollama at ${OLLAMA_URL}"
+        log_info "Make sure Ollama is running on the remote machine and the URL is correct."
+        exit 1
+    fi
 
+    log_ok "Skipping local model download (remote mode)"
+else
+    section "Phase 2/4 : Download Model (${OLLAMA_MODEL_NAME})"
+
+    # Ensure Ollama is running
+    if ! curl_check http://localhost:11434/api/tags &>/dev/null; then
+        log_run "Starting Ollama server..."
+        ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+        sleep 3
+        if curl_check http://localhost:11434/api/tags &>/dev/null; then
+            log_ok "Ollama server started"
+        else
+            log_fail "Could not start Ollama server. Check $LOG_DIR/ollama.log"
+            exit 1
+        fi
+    else
+        log_ok "Ollama server running"
+    fi
+
+    # Pull model (Ollama handles download, caching, and resume)
     if ollama_has_model "$OLLAMA_MODEL_NAME"; then
         MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
-        log_ok "Model installed ${DIM}(${MODEL_SIZE}, $(timer_elapsed)s)${RST}"
+        log_ok "Model '${OLLAMA_MODEL_NAME}' already installed ${DIM}(${MODEL_SIZE})${RST}"
     else
-        log_fail "Failed to pull model '${OLLAMA_MODEL_NAME}'"
-        exit 1
+        timer_start
+        log_run "Pulling ${OLLAMA_MODEL_NAME} from Ollama registry..."
+        log_info "This is a ~50 GB download. Progress will appear below."
+        log_info "The download resumes if interrupted."
+        echo ""
+        ollama pull "$OLLAMA_MODEL_NAME" 2>&1 | while IFS= read -r line; do
+            echo -e "         ${DIM}${line}${RST}"
+        done
+
+        if ollama_has_model "$OLLAMA_MODEL_NAME"; then
+            MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
+            log_ok "Model installed ${DIM}(${MODEL_SIZE}, $(timer_elapsed)s)${RST}"
+        else
+            log_fail "Failed to pull model '${OLLAMA_MODEL_NAME}'"
+            exit 1
+        fi
     fi
 fi
 
@@ -310,17 +455,18 @@ log_run "Installing proxy dependencies..."
 ) >> "$LOG_DIR/proxy-install.log" 2>&1
 log_ok "Proxy dependencies installed"
 
-# Write proxy .env
+# Write proxy .env (use remote URL if in remote mode)
+OLLAMA_URL=$(get_ollama_url)
 cat > "$PROXY_DIR/.env" <<ENVEOF
 OPENAI_API_KEY=ollama-local
-OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_BASE_URL=${OLLAMA_URL}/v1
 BIG_MODEL=${OLLAMA_MODEL_NAME}
 MIDDLE_MODEL=${OLLAMA_MODEL_NAME}
 SMALL_MODEL=${OLLAMA_MODEL_NAME}
 HOST=0.0.0.0
 PORT=${PROXY_PORT}
 ENVEOF
-log_ok "Proxy configured ${DIM}(port ${PROXY_PORT})${RST}"
+log_ok "Proxy configured ${DIM}(port ${PROXY_PORT}, Ollama at ${OLLAMA_URL})${RST}"
 
 # =========================================================================
 #  PHASE 4: OpenClaw
@@ -405,6 +551,14 @@ if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
 else
     log_warn "Node.js < 22 — skipping OpenClaw"
     log_info "Install Node 22+, then re-run this script."
+fi
+
+# =========================================================================
+#  Persist remote config
+# =========================================================================
+if [ "$REMOTE_MODE" = true ] && [ -n "${OLLAMA_HOST:-}" ]; then
+    echo "OLLAMA_HOST=${OLLAMA_HOST}" > "$PROJECT_DIR/.tritium.env"
+    log_ok "Saved OLLAMA_HOST to .tritium.env"
 fi
 
 # =========================================================================
