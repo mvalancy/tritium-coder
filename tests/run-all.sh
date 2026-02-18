@@ -13,8 +13,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$PROJECT_DIR/scripts/lib/common.sh"
 
+# --- Help ---
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    banner
+    echo -e "  ${BOLD}./test${RST} — Run the coding test suite"
+    echo ""
+    echo -e "  Sends real coding jobs to the OpenClaw agent and validates the output."
+    echo -e "  Each test asks the agent to build a project, then checks the generated"
+    echo -e "  files for correctness (file existence, size, key patterns, syntax)."
+    echo ""
+    echo -e "  ${BOLD}Usage:${RST}  ./test [test-name]"
+    echo ""
+    echo -e "  ${BOLD}Arguments:${RST}"
+    echo -e "    ${CYN}(none)${RST}     Run all tests sequentially"
+    echo -e "    ${CYN}todo${RST}       Flask todo app (simplest)"
+    echo -e "    ${CYN}api${RST}        REST API bookstore"
+    echo -e "    ${CYN}tetris${RST}     Tetris web game"
+    echo -e "    ${CYN}pong${RST}       Pong web game"
+    echo -e "    ${CYN}smashtv${RST}    Smash TV arena shooter (largest, 5-15 min)"
+    echo ""
+    echo -e "  ${BOLD}Examples:${RST}"
+    echo -e "    ./test              Run all tests"
+    echo -e "    ./test tetris       Run just the Tetris test"
+    echo ""
+    echo -e "  ${BOLD}Requires:${RST}  Stack must be running (${CYN}./start${RST} first)"
+    echo -e "  ${BOLD}Output:${RST}    /tmp/tritium-tests/"
+    echo ""
+    exit 0
+fi
+
 TEST_OUTPUT_DIR="/tmp/tritium-tests"
-GATEWAY_PORT=18789
 AGENT_TIMEOUT=900  # 15 minutes per test (smash TV may use the full budget)
 
 # Colors for test results
@@ -33,13 +61,13 @@ results=()
 
 preflight() {
     # Check Ollama
-    if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
-        echo -e "  ${BRED}Ollama is not running.${RST} Run ${CYN}./start.sh${RST} first."
+    if ! curl_check http://localhost:11434/api/tags &>/dev/null; then
+        echo -e "  ${BRED}Ollama is not running.${RST} Run ${CYN}./start${RST} first."
         exit 1
     fi
     # Check gateway
     if ! ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
-        echo -e "  ${BRED}OpenClaw gateway is not running.${RST} Run ${CYN}./start.sh${RST} first."
+        echo -e "  ${BRED}OpenClaw gateway is not running.${RST} Run ${CYN}./start${RST} first."
         exit 1
     fi
     log_ok "Preflight checks passed"
@@ -382,6 +410,9 @@ Write ALL files listed above. Each file should be well-structured with classes a
 # -------------------------------------------------------------------------
 
 banner
+echo -e "  ${DIM}Sends coding jobs to the agent and validates the output files.${RST}"
+echo ""
+
 section "Tritium Coder Test Suite"
 
 echo -e "  ${DIM}Output directory: $TEST_OUTPUT_DIR${RST}"
