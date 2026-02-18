@@ -1,10 +1,45 @@
 # Tritium Coder
 
-**Dead simple local AI coding stack. One install. One command. Scale across your hardware mesh.**
+**Local AI coding stack for NVIDIA hardware with 128 GB+ unified memory.**
 
-Run AI coding agents on your own hardware — one machine or a fleet. No cloud. No API keys. No data leaves your network.
+Run AI coding agents on your own hardware — no cloud, no API keys, no data leaves your network.
+
+> **Target hardware:** NVIDIA GB10 (128 GB), Jetson AGX Thor, or multi-GPU workstations.
+> **Not enough GPU?** Use [remote mode over Tailscale](#remote-setup) — run inference on a GPU server, everything else locally.
 
 *By Matthew Valancy | Valpatel Software | (c) 2026*
+
+---
+
+### Requirements
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| **GPU Memory** | 32 GB VRAM or unified | 128 GB+ unified |
+| **RAM** | 16 GB | 64 GB+ |
+| **Disk** | 80 GB free | 200 GB+ |
+| **OS** | Linux (aarch64 or x86_64) | Ubuntu 24.04+ |
+
+### Will My Hardware Work?
+
+| Hardware | GPU Memory | Verdict |
+|----------|------------|---------|
+| **NVIDIA GB10** | 128 GB unified | Best — runs the full stack |
+| **Jetson AGX Thor** | 128 GB unified | Excellent |
+| **RTX 5090 x2** | 64 GB VRAM | Good — fits with quantization |
+| **RTX 4090** | 24 GB VRAM | Mesh node only, or use `QUANT=UD-TQ1_0` |
+| **RTX 3060 6 GB** | 6 GB VRAM | Will not work — use [remote mode](#remote-setup) |
+| **No NVIDIA GPU** | 0 | Remote mode only |
+| **8 GB laptop** | 0 | Will not work — use [remote mode](#remote-setup) |
+
+### Tested Hardware
+
+| Device | RAM | Price | Fit |
+|--------|-----|-------|-----|
+| **NVIDIA GB10** | 128 GB unified | ~$3,000 | Best value |
+| **Jetson AGX Thor** | 128 GB unified | ~$5,000+ | Excellent |
+| **RTX 5090 x2 workstation** | 128 GB+ | $8,000+ | Great |
+| **Mac Studio M4 Ultra** | 192 GB unified | ~$8,000 | Use MLX quants |
 
 ---
 
@@ -50,6 +85,36 @@ scripts/run-claude.sh           # Launch Claude Code (local)
 ./status                        # Check what's running
 ./test                          # Run test suite
 ```
+
+## Remote Setup
+
+If your local machine doesn't have enough GPU memory, you can offload model inference to a remote GPU server over Tailscale. Everything else (proxy, gateway, dashboard) runs locally.
+
+### On the remote GPU machine:
+
+```bash
+# Install Ollama and pull the model
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3-coder-next
+
+# Install Tailscale (if not already)
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up
+
+# Make Ollama listen on all interfaces (for Tailscale access)
+# Edit /etc/systemd/system/ollama.service or set:
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+### On your local machine:
+
+```bash
+# Replace 100.x.x.x with your remote machine's Tailscale IP
+OLLAMA_HOST=http://100.x.x.x:11434 ./install.sh --remote
+./start
+```
+
+This skips the ~50 GB model download. The proxy and gateway run locally — only inference calls go over the Tailscale network (encrypted, peer-to-peer).
 
 ## Architecture
 
@@ -186,24 +251,6 @@ tritium-coder/
     security.md           # Security model
     mesh.md               # Multi-node setup guide
 ```
-
-## System Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| RAM | 96 GB unified/shared | 128 GB+ |
-| GPU | NVIDIA 8 GB+ VRAM | NVIDIA unified memory (GB10, Jetson) |
-| Disk | 120 GB free | 200 GB+ |
-| OS | Linux (aarch64 or x86_64) | Ubuntu 24.04+ |
-
-### Tested Hardware
-
-| Device | RAM | Price | Fit |
-|--------|-----|-------|-----|
-| **NVIDIA GB10** | 128 GB unified | ~$3,000 | Best value |
-| **Jetson AGX Thor** | 128 GB unified | ~$5,000+ | Excellent |
-| **RTX 5090 x2 workstation** | 128 GB+ | $8,000+ | Great |
-| **Mac Studio M4 Ultra** | 192 GB unified | ~$8,000 | Use MLX quants |
 
 ## Testing
 
