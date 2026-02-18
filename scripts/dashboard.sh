@@ -30,11 +30,15 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 banner
-echo -e "  ${DIM}Tritium Coder control panel — a custom lightweight web UI built for this${RST}"
-echo -e "  ${DIM}project (not part of OpenClaw). Shows live service status for Ollama, the${RST}"
-echo -e "  ${DIM}proxy, and the gateway, plus model info, resource usage, and quick-action${RST}"
-echo -e "  ${DIM}buttons. Separate from the OpenClaw chat dashboard (port ${GATEWAY_PORT}).${RST}"
-echo ""
+
+# --- Auto-start the stack if not running ---
+if ! curl_check http://localhost:11434/api/tags &>/dev/null \
+   || ! ss -tlnp 2>/dev/null | grep -q ":${PROXY_PORT} "; then
+    log_run "Stack not running — starting it now..."
+    echo ""
+    "$SCRIPTS_DIR/start.sh"
+    echo ""
+fi
 
 PANEL_DIR="$PROJECT_DIR/web"
 
