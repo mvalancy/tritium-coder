@@ -56,8 +56,8 @@ banner() {
     echo ""
     echo -e "  ${BMAG}+$(printf '%0.s-' $(seq 1 $width))+"
     echo -e "  |${RST}  ${BOLD}${WHT}TRITIUM CODER${RST}  ${DIM}Local AI Coding Stack${RST}                        ${BMAG}|"
-    echo -e "  |${RST}  ${CYN}Qwen3-Coder-Next${RST} + ${CYN}Claude Code${RST} + ${CYN}OpenClaw${RST}             ${BMAG}|"
-    echo -e "  |${RST}  ${DIM}(c) 2026 Matthew Valancy  |  Valpatel Software${RST}        ${BMAG}|"
+    echo -e "  |${RST}  ${CYN}Ollama${RST} + ${CYN}Claude Code${RST} + ${CYN}OpenClaw${RST}                             ${BMAG}|"
+    echo -e "  |${RST}  ${DIM}(c) 2026 Matthew Valancy  |  Valpatel Software${RST}              ${BMAG}|"
     echo -e "  +$(printf '%0.s-' $(seq 1 $width))+${RST}"
     echo ""
 }
@@ -117,3 +117,52 @@ CONFIG_DIR="$PROJECT_DIR/config"
 
 OLLAMA_MODEL_NAME="qwen3-coder-next"
 PROXY_PORT=8082
+GATEWAY_PORT=18789
+PANEL_PORT=18790
+
+# --- Network helpers ---
+# Determine bind address: 0.0.0.0 if Tailscale is online (private network),
+# 127.0.0.1 otherwise. Checked at runtime so it picks up Tailscale installed
+# after initial setup.
+get_bind_addr() {
+    if command -v tailscale &>/dev/null; then
+        local online
+        online=$(tailscale status --json 2>/dev/null \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('Online',False))" 2>/dev/null || echo "")
+        if [ "$online" = "True" ]; then
+            echo "0.0.0.0"
+            return
+        fi
+    fi
+    echo "127.0.0.1"
+}
+
+# Gateway bind mode: "all" if Tailscale is online, "loopback" otherwise.
+get_gateway_bind() {
+    if [ "$(get_bind_addr)" = "0.0.0.0" ]; then
+        echo "all"
+    else
+        echo "loopback"
+    fi
+}
+
+# --- HTTP helpers ---
+# curl with sane timeouts so scripts don't hang if a service is unresponsive
+curl_check() {
+    curl -s --connect-timeout 3 --max-time 5 "$@"
+}
+
+# --- Ollama helpers ---
+# ollama list | grep -q triggers SIGPIPE with pipefail (grep -q closes pipe
+# early while ollama is still writing). Capture output first to avoid this.
+ollama_has_model() {
+    local models
+    models=$(ollama list 2>/dev/null) || return 1
+    echo "$models" | grep -q "$1"
+}
+
+ollama_model_size() {
+    local models
+    models=$(ollama list 2>/dev/null) || return 1
+    echo "$models" | grep "$1" | awk '{print $3, $4}'
+}
