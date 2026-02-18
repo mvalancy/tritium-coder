@@ -620,7 +620,9 @@ prompt_context() {
     # Project directive — what the user asked for (drives every phase, especially resume)
     ctx="${ctx}PROJECT GOAL: ${DESCRIPTION}
 
-PHILOSOPHY: Take your time. Quality over speed. Trust nothing — verify everything from the USER's perspective, not just code review. Ask: 'would a real person have a good experience?'
+PHILOSOPHY: Take your time. Quality over speed. Do a great job even if it means going slower. Trust nothing — verify everything from the USER's perspective, not just code review. Ask: 'would a real person have a good experience?'
+
+HOUSEKEEPING: After making changes, update ${OUTPUT_DIR}/CLAUDE.md to reflect the current state of the project — what it does, key architecture decisions, file structure, and anything the next session should know. Keep it concise. Also update docs/ and README.md when your changes affect features or usage.
 
 $(maturity_guidance)
 
@@ -655,15 +657,13 @@ ${CYCLE_HISTORY}
 agent_code() {
     local prompt="$1"
     local timeout="${2:-900}"
+    local mode="${3:-new}"   # "new" = fresh session, "continue" = resume last
 
     # Claude Code as the coding agent, talking to Ollama through the proxy.
-    # Uses --continue to maintain session context across cycles within
-    # the same project directory. First call creates the session, subsequent
-    # calls resume it — Claude Code remembers what it already did.
+    # Each phase gets a fresh session (new task, clean context).
+    # Only use --continue for follow-ups within the same task (e.g. vision-fix).
     local continue_flag=""
-    if [ "$CYCLE" -gt 1 ] || [ -d "${OUTPUT_DIR}/.claude" ]; then
-        continue_flag="--continue"
-    fi
+    [ "$mode" = "continue" ] && continue_flag="--continue"
 
     ANTHROPIC_BASE_URL="http://localhost:${PROXY_PORT:-8082}" \
     ANTHROPIC_API_KEY="local-model" \
@@ -1691,7 +1691,7 @@ else: print('')
                 remaining=$(time_remaining)
                 [ "$remaining" -lt "$iter_timeout" ] && iter_timeout=$remaining
                 if [ "$iter_timeout" -gt 60 ]; then
-                    response=$(agent_code "$local_prompt" "$iter_timeout")
+                    response=$(agent_code "$local_prompt" "$iter_timeout" "continue")
                     log_to "VISION FIX response_len=${#response}"
                     record_cycle "vision-fix" "Fixed issues from vision review"
                     git_checkpoint "cycle-${CYCLE}-vision-fix"
