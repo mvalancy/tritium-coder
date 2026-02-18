@@ -58,6 +58,8 @@ banner() {
     echo -e "  |${RST}  ${BOLD}${WHT}TRITIUM CODER${RST}  ${DIM}Local AI Coding Stack${RST}                        ${BMAG}|"
     echo -e "  |${RST}  ${CYN}Ollama${RST} + ${CYN}Claude Code${RST} + ${CYN}OpenClaw${RST}                             ${BMAG}|"
     echo -e "  |${RST}  ${DIM}(c) 2026 Matthew Valancy  |  Valpatel Software${RST}              ${BMAG}|"
+    echo -e "  +$(printf '%0.s-' $(seq 1 $width))+"
+    echo -e "  |${RST}  ${DIM}MIT License${RST}  ${CYN}github.com/mvalancy/tritium-coder${RST}              ${BMAG}|"
     echo -e "  +$(printf '%0.s-' $(seq 1 $width))+${RST}"
     echo ""
 }
