@@ -166,3 +166,178 @@ ollama_model_size() {
     models=$(ollama list 2>/dev/null) || return 1
     echo "$models" | grep "$1" | awk '{print $3, $4}'
 }
+
+ollama_model_loaded() {
+    local ps
+    ps=$(curl_check http://localhost:11434/api/ps 2>/dev/null) || return 1
+    echo "$ps" | grep -q "$1"
+}
+
+# --- Port check helper ---
+port_listening() {
+    ss -tlnp 2>/dev/null | grep -q ":${1} "
+}
+
+# =========================================================================
+#  Service ensure functions — idempotent, used by start.sh and dashboard.sh
+# =========================================================================
+
+ensure_ollama() {
+    if curl_check http://localhost:11434/api/tags &>/dev/null; then
+        log_ok "Ollama server"
+        return 0
+    fi
+    log_run "Starting Ollama server..."
+    ensure_dir "$LOG_DIR"
+    ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+    for _ in $(seq 1 15); do
+        curl_check http://localhost:11434/api/tags &>/dev/null && break
+        sleep 1
+    done
+    if curl_check http://localhost:11434/api/tags &>/dev/null; then
+        log_ok "Ollama server started"
+        return 0
+    fi
+    log_fail "Ollama server failed to start. Check $LOG_DIR/ollama.log"
+    return 1
+}
+
+ensure_model() {
+    if ! ollama_has_model "$OLLAMA_MODEL_NAME"; then
+        log_fail "Model '${OLLAMA_MODEL_NAME}' not found in Ollama."
+        log_info "Run ${CYN}./install.sh${RST} first to download it."
+        return 1
+    fi
+    # Skip warmup if already loaded
+    if ollama_model_loaded "$OLLAMA_MODEL_NAME"; then
+        log_ok "Model '${OLLAMA_MODEL_NAME}' loaded"
+        return 0
+    fi
+    log_run "Loading model into memory (may take 1-3 minutes)..."
+    ollama run "$OLLAMA_MODEL_NAME" "Respond with only: READY" > /tmp/.tritium-warmup 2>/dev/null &
+    local pid=$!
+    spin "$pid" "Loading ${OLLAMA_MODEL_NAME} into GPU memory..."
+    wait "$pid" 2>/dev/null || true
+    local response
+    response=$(cat /tmp/.tritium-warmup 2>/dev/null || echo "")
+    rm -f /tmp/.tritium-warmup
+    if [ -n "$response" ]; then
+        log_ok "Model loaded and responding"
+    else
+        log_warn "Model loaded but gave empty response (may still work)"
+    fi
+    return 0
+}
+
+ensure_proxy() {
+    if port_listening "$PROXY_PORT"; then
+        log_ok "Claude Code proxy :${PROXY_PORT}"
+        return 0
+    fi
+    if [ ! -f "$PROXY_DIR/start_proxy.py" ]; then
+        log_fail "Proxy not installed. Run ${CYN}./install.sh${RST} first."
+        return 1
+    fi
+    if [ ! -d "$PROXY_DIR/.venv" ]; then
+        log_fail "Proxy venv not set up. Run ${CYN}./install.sh${RST} first."
+        return 1
+    fi
+    log_run "Starting Claude Code proxy on port ${PROXY_PORT}..."
+    ensure_dir "$LOG_DIR"
+    (
+        cd "$PROXY_DIR"
+        source .venv/bin/activate
+        nohup python start_proxy.py > "$LOG_DIR/proxy.log" 2>&1 &
+        echo $! > "$LOG_DIR/proxy.pid"
+    )
+    for _ in $(seq 1 10); do
+        port_listening "$PROXY_PORT" && break
+        sleep 1
+    done
+    if port_listening "$PROXY_PORT"; then
+        log_ok "Proxy started on port ${PROXY_PORT}"
+        return 0
+    fi
+    log_fail "Proxy failed to start. Check $LOG_DIR/proxy.log"
+    return 1
+}
+
+ensure_gateway() {
+    if port_listening "$GATEWAY_PORT"; then
+        log_ok "OpenClaw gateway :${GATEWAY_PORT}"
+        return 0
+    fi
+    if ! command -v openclaw &>/dev/null; then
+        log_warn "OpenClaw not installed (optional)"
+        return 1
+    fi
+    local gw_bind
+    gw_bind=$(get_gateway_bind)
+    # Apply hardened config if not present
+    local oc_config="$HOME/.openclaw/openclaw.json"
+    if [ ! -f "$oc_config" ]; then
+        mkdir -p "$HOME/.openclaw"
+        sed -e "s/qwen3-coder-next/${OLLAMA_MODEL_NAME}/g" \
+            -e "s/\"bind\": \"loopback\"/\"bind\": \"${gw_bind}\"/" \
+            "$CONFIG_DIR/openclaw.json" > "$oc_config"
+    fi
+    log_run "Starting OpenClaw gateway (bind ${gw_bind})..."
+    ensure_dir "$LOG_DIR"
+    (
+        cd "$PROJECT_DIR"
+        nohup openclaw gateway run --bind "$gw_bind" > "$LOG_DIR/openclaw-gateway.log" 2>&1 &
+        echo $! > "$LOG_DIR/openclaw-gateway.pid"
+    )
+    for _ in $(seq 1 8); do
+        port_listening "$GATEWAY_PORT" && break
+        sleep 1
+    done
+    if port_listening "$GATEWAY_PORT"; then
+        log_ok "OpenClaw gateway started on port ${GATEWAY_PORT}"
+        return 0
+    fi
+    log_warn "OpenClaw gateway may not have started. Check $LOG_DIR/openclaw-gateway.log"
+    return 1
+}
+
+ensure_panel() {
+    if port_listening "$PANEL_PORT"; then
+        log_ok "Control panel :${PANEL_PORT}"
+        return 0
+    fi
+    local panel_dir="$PROJECT_DIR/web"
+    if [ ! -f "$panel_dir/index.html" ]; then
+        log_warn "Control panel files not found"
+        return 1
+    fi
+    local bind_addr
+    bind_addr=$(get_bind_addr)
+    log_run "Starting control panel on port ${PANEL_PORT}..."
+    ensure_dir "$LOG_DIR"
+    (
+        cd "$panel_dir"
+        nohup python3 -m http.server "$PANEL_PORT" --bind "$bind_addr" > "$LOG_DIR/panel.log" 2>&1 &
+        echo $! > "$LOG_DIR/panel.pid"
+    )
+    sleep 1
+    if port_listening "$PANEL_PORT"; then
+        log_ok "Control panel started on port ${PANEL_PORT}"
+        return 0
+    fi
+    log_warn "Control panel may not have started. Check $LOG_DIR/panel.log"
+    return 1
+}
+
+# Start all services. Returns 0 if core services (Ollama + proxy) are up.
+ensure_stack() {
+    ensure_dir "$LOG_DIR"
+    local ok=true
+    ensure_ollama  || ok=false
+    if [ "$ok" = true ]; then
+        ensure_model || true
+    fi
+    ensure_proxy   || ok=false
+    ensure_gateway || true
+    ensure_panel   || true
+    return 0
+}

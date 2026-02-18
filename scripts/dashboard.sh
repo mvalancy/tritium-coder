@@ -14,8 +14,8 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     banner
     echo -e "  ${BOLD}./dashboard${RST} — Open the web control panel"
     echo ""
-    echo -e "  Starts a lightweight web UI for monitoring the stack at a glance."
-    echo -e "  Shows service status, model info, resource usage, and quick actions."
+    echo -e "  Starts the stack if needed, launches the control panel, and opens"
+    echo -e "  your browser. Safe to run multiple times."
     echo ""
     echo -e "  ${BOLD}Usage:${RST}  ./dashboard [options]"
     echo ""
@@ -31,53 +31,12 @@ fi
 
 banner
 
-# --- Auto-start the stack if not running ---
-if ! curl_check http://localhost:11434/api/tags &>/dev/null \
-   || ! ss -tlnp 2>/dev/null | grep -q ":${PROXY_PORT} "; then
-    log_run "Stack not running — starting it now..."
-    echo ""
-    "$SCRIPTS_DIR/start.sh"
-    echo ""
-fi
-
-# --- Quick status check ---
-OLLAMA_UP=false; PROXY_UP=false; GATEWAY_UP=false
-curl_check http://localhost:11434/api/tags &>/dev/null && OLLAMA_UP=true
-ss -tlnp 2>/dev/null | grep -q ":${PROXY_PORT} " && PROXY_UP=true
-ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} " && GATEWAY_UP=true
-
-if [ "$OLLAMA_UP" = true ]; then log_ok "Ollama"; else log_fail "Ollama not running"; fi
-if [ "$PROXY_UP" = true ]; then log_ok "Proxy"; else log_fail "Proxy not running"; fi
-if [ "$GATEWAY_UP" = true ]; then log_ok "Gateway"; else log_warn "Gateway not running"; fi
-
-PANEL_DIR="$PROJECT_DIR/web"
-
-ensure_dir "$LOG_DIR"
-
-# Start or confirm control panel
-if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
-    log_ok "Control panel"
-else
-    BIND_ADDR=$(get_bind_addr)
-    log_run "Starting control panel on port ${PANEL_PORT} (bind ${BIND_ADDR})..."
-    (
-        cd "$PANEL_DIR"
-        nohup python3 -m http.server "$PANEL_PORT" --bind "$BIND_ADDR" > "$LOG_DIR/panel.log" 2>&1 &
-        echo $! > "$LOG_DIR/panel.pid"
-    )
-    sleep 1
-
-    if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
-        log_ok "Control panel started"
-    else
-        log_fail "Control panel failed to start. Check $LOG_DIR/panel.log"
-        exit 1
-    fi
-fi
+# Ensure the full stack is up (starts anything that's down)
+ensure_stack
 
 URL="http://localhost:${PANEL_PORT}"
-
-log_ok "Local:  ${CYN}${URL}${RST}"
+echo ""
+log_ok "Control panel: ${CYN}${URL}${RST}"
 
 # Show Tailscale URL if available
 if command -v tailscale &>/dev/null; then
