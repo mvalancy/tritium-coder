@@ -46,6 +46,12 @@ while [ $# -gt 0 ]; do
         --name)     PROJECT_NAME="$2"; shift 2 ;;
         --hours)    HOURS="$2"; shift 2 ;;
         --dir)      OUTPUT_DIR="$2"; shift 2 ;;
+        --resume)
+            # Shorthand: --resume <name> is equivalent to --dir examples/<name>
+            OUTPUT_DIR="${PROJECT_DIR}/examples/${2}"
+            PROJECT_NAME="$2"
+            shift 2
+            ;;
         --no-vision) USE_VISION=false; shift ;;
         --vision-model) VISION_MODEL="$2"; shift 2 ;;
         --help|-h)
@@ -56,8 +62,15 @@ while [ $# -gt 0 ]; do
             echo "    --name <name>         Project name"
             echo "    --hours <n>           Max hours (default: 4)"
             echo "    --dir <path>          Output directory"
+            echo "    --resume <name>       Resume an existing project in examples/<name>"
             echo "    --no-vision           Skip vision reviews"
             echo "    --vision-model <m>    Vision model (default: qwen3-vl:32b)"
+            echo ""
+            echo "  Examples:"
+            echo "    ./iterate \"Build a Tetris game\"                        # New project"
+            echo "    ./iterate \"Build a Tetris game\" --hours 2              # 2 hour budget"
+            echo "    ./iterate \"Add multiplayer\" --resume tetris            # Resume with new goal"
+            echo "    ./iterate \"Fix the pause menu\" --dir examples/tetris   # Resume with --dir"
             echo ""
             exit 0
             ;;
@@ -604,8 +617,10 @@ prompt_context() {
         fi
     done
 
-    # Core philosophy
-    ctx="${ctx}PHILOSOPHY: Take your time. Quality over speed. Trust nothing — verify everything from the USER's perspective, not just code review. Ask: 'would a real person have a good experience?'
+    # Project directive — what the user asked for (drives every phase, especially resume)
+    ctx="${ctx}PROJECT GOAL: ${DESCRIPTION}
+
+PHILOSOPHY: Take your time. Quality over speed. Trust nothing — verify everything from the USER's perspective, not just code review. Ask: 'would a real person have a good experience?'
 
 $(maturity_guidance)
 
