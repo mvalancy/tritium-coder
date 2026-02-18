@@ -29,6 +29,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 banner
+tlog "--- stop.sh started ---"
 echo -e "  ${DIM}Stopping proxy, gateway, and panel. Unloading model from GPU memory.${RST}"
 echo ""
 

@@ -35,11 +35,26 @@ SYM_RUN="${BBLU}[>>]${RST}"
 SYM_INFO="${BCYN}[--]${RST}"
 SYM_SKIP="${DIM}[--]${RST}"
 
-# --- Logging ---
-log_ok()   { echo -e "  ${SYM_OK}  $*"; }
-log_fail() { echo -e "  ${SYM_FAIL}  ${RED}$*${RST}"; }
-log_warn() { echo -e "  ${SYM_WARN}  ${YLW}$*${RST}"; }
-log_run()  { echo -e "  ${SYM_RUN}  $*"; }
+# --- Structured event log ---
+# Appends plain-text timestamped lines to logs/tritium.log.
+# Called automatically by log_ok/fail/warn/run, or directly for extra detail.
+TRITIUM_LOG=""  # set after LOG_DIR is defined below
+
+tlog() {
+    [ -z "$TRITIUM_LOG" ] && return
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    # Strip ANSI color codes for the log file
+    local clean
+    clean=$(echo -e "$*" | sed 's/\x1b\[[0-9;]*m//g')
+    echo "[$ts] $clean" >> "$TRITIUM_LOG"
+}
+
+# --- Logging (terminal + event log) ---
+log_ok()   { echo -e "  ${SYM_OK}  $*"; tlog "OK    $*"; }
+log_fail() { echo -e "  ${SYM_FAIL}  ${RED}$*${RST}"; tlog "FAIL  $*"; }
+log_warn() { echo -e "  ${SYM_WARN}  ${YLW}$*${RST}"; tlog "WARN  $*"; }
+log_run()  { echo -e "  ${SYM_RUN}  $*"; tlog "RUN   $*"; }
 log_info() { echo -e "  ${SYM_INFO}  ${DIM}$*${RST}"; }
 log_skip() { echo -e "  ${SYM_SKIP}  ${DIM}$*${RST}"; }
 
@@ -117,6 +132,19 @@ PROXY_DIR="$PROJECT_DIR/.proxy"
 LOG_DIR="$PROJECT_DIR/logs"
 CONFIG_DIR="$PROJECT_DIR/config"
 
+# Initialize event log (now that LOG_DIR is set)
+ensure_dir "$LOG_DIR"
+TRITIUM_LOG="$LOG_DIR/tritium.log"
+
+# --- Timing helpers ---
+_timer_start=0
+timer_start() { _timer_start=$(date +%s); }
+timer_elapsed() {
+    local now
+    now=$(date +%s)
+    echo $(( now - _timer_start ))
+}
+
 OLLAMA_MODEL_NAME="qwen3-coder-next"
 PROXY_PORT=8082
 GATEWAY_PORT=18789
@@ -189,6 +217,7 @@ ensure_ollama() {
         log_ok "Ollama server"
         return 0
     fi
+    timer_start
     log_run "Starting Ollama server..."
     ensure_dir "$LOG_DIR"
     ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
@@ -197,10 +226,10 @@ ensure_ollama() {
         sleep 1
     done
     if curl_check http://localhost:11434/api/tags &>/dev/null; then
-        log_ok "Ollama server started"
+        log_ok "Ollama server started ($(timer_elapsed)s)"
         return 0
     fi
-    log_fail "Ollama server failed to start. Check $LOG_DIR/ollama.log"
+    log_fail "Ollama server failed to start after $(timer_elapsed)s. Check $LOG_DIR/ollama.log"
     return 1
 }
 
@@ -215,18 +244,20 @@ ensure_model() {
         log_ok "Model '${OLLAMA_MODEL_NAME}' loaded"
         return 0
     fi
+    timer_start
     log_run "Loading model into memory (may take 1-3 minutes)..."
     ollama run "$OLLAMA_MODEL_NAME" "Respond with only: READY" > /tmp/.tritium-warmup 2>/dev/null &
     local pid=$!
     spin "$pid" "Loading ${OLLAMA_MODEL_NAME} into GPU memory..."
     wait "$pid" 2>/dev/null || true
-    local response
+    local response elapsed
     response=$(cat /tmp/.tritium-warmup 2>/dev/null || echo "")
     rm -f /tmp/.tritium-warmup
+    elapsed=$(timer_elapsed)
     if [ -n "$response" ]; then
-        log_ok "Model loaded and responding"
+        log_ok "Model loaded and responding (${elapsed}s)"
     else
-        log_warn "Model loaded but gave empty response (may still work)"
+        log_warn "Model loaded but gave empty response after ${elapsed}s (may still work)"
     fi
     return 0
 }
@@ -244,6 +275,7 @@ ensure_proxy() {
         log_fail "Proxy venv not set up. Run ${CYN}./install.sh${RST} first."
         return 1
     fi
+    timer_start
     log_run "Starting Claude Code proxy on port ${PROXY_PORT}..."
     ensure_dir "$LOG_DIR"
     (
@@ -257,10 +289,10 @@ ensure_proxy() {
         sleep 1
     done
     if port_listening "$PROXY_PORT"; then
-        log_ok "Proxy started on port ${PROXY_PORT}"
+        log_ok "Proxy started on port ${PROXY_PORT} ($(timer_elapsed)s)"
         return 0
     fi
-    log_fail "Proxy failed to start. Check $LOG_DIR/proxy.log"
+    log_fail "Proxy failed to start after $(timer_elapsed)s. Check $LOG_DIR/proxy.log"
     return 1
 }
 
@@ -283,6 +315,7 @@ ensure_gateway() {
             -e "s/\"bind\": \"loopback\"/\"bind\": \"${gw_bind}\"/" \
             "$CONFIG_DIR/openclaw.json" > "$oc_config"
     fi
+    timer_start
     log_run "Starting OpenClaw gateway (bind ${gw_bind})..."
     ensure_dir "$LOG_DIR"
     (
@@ -295,10 +328,10 @@ ensure_gateway() {
         sleep 1
     done
     if port_listening "$GATEWAY_PORT"; then
-        log_ok "OpenClaw gateway started on port ${GATEWAY_PORT}"
+        log_ok "OpenClaw gateway started on port ${GATEWAY_PORT} ($(timer_elapsed)s)"
         return 0
     fi
-    log_warn "OpenClaw gateway may not have started. Check $LOG_DIR/openclaw-gateway.log"
+    log_warn "OpenClaw gateway may not have started after $(timer_elapsed)s. Check $LOG_DIR/openclaw-gateway.log"
     return 1
 }
 
@@ -333,6 +366,9 @@ ensure_panel() {
 # Start all services. Returns 0 if core services (Ollama + proxy) are up.
 ensure_stack() {
     ensure_dir "$LOG_DIR"
+    local stack_start
+    stack_start=$(date +%s)
+    tlog "--- ensure_stack started ($(basename "$0")) ---"
     local ok=true
     ensure_ollama  || ok=false
     if [ "$ok" = true ]; then
@@ -341,5 +377,7 @@ ensure_stack() {
     ensure_proxy   || ok=false
     ensure_gateway || true
     ensure_panel   || true
+    local stack_elapsed=$(( $(date +%s) - stack_start ))
+    tlog "--- ensure_stack finished (${stack_elapsed}s total) ---"
     return 0
 }

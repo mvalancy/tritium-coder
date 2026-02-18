@@ -38,6 +38,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 banner
+tlog "--- install.sh started ---"
 
 echo -e "  ${DIM}Model: ${RST}${BOLD}${OLLAMA_MODEL_NAME}${RST}  ${DIM}(~50 GB download)${RST}"
 echo ""
@@ -261,6 +262,7 @@ if ollama_has_model "$OLLAMA_MODEL_NAME"; then
     MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
     log_ok "Model '${OLLAMA_MODEL_NAME}' already installed ${DIM}(${MODEL_SIZE})${RST}"
 else
+    timer_start
     log_run "Pulling ${OLLAMA_MODEL_NAME} from Ollama registry..."
     log_info "This is a ~50 GB download. Progress will appear below."
     log_info "The download resumes if interrupted."
@@ -271,7 +273,7 @@ else
 
     if ollama_has_model "$OLLAMA_MODEL_NAME"; then
         MODEL_SIZE=$(ollama_model_size "$OLLAMA_MODEL_NAME")
-        log_ok "Model installed ${DIM}(${MODEL_SIZE})${RST}"
+        log_ok "Model installed ${DIM}(${MODEL_SIZE}, $(timer_elapsed)s)${RST}"
     else
         log_fail "Failed to pull model '${OLLAMA_MODEL_NAME}'"
         exit 1
@@ -350,10 +352,11 @@ if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
 
     # --- Build from source ---
     if [ ! -d "$OPENCLAW_DIR/dist" ]; then
+        timer_start
         log_run "Building OpenClaw from source..."
         (cd "$OPENCLAW_DIR" && pnpm build) >> "$LOG_DIR/openclaw-install.log" 2>&1
         if [ -d "$OPENCLAW_DIR/dist" ]; then
-            log_ok "OpenClaw built successfully"
+            log_ok "OpenClaw built successfully ($(timer_elapsed)s)"
         else
             log_fail "OpenClaw build failed. See $LOG_DIR/openclaw-install.log"
         fi
@@ -407,6 +410,7 @@ fi
 # =========================================================================
 #  DONE
 # =========================================================================
+tlog "--- install.sh finished ---"
 echo ""
 echo -e "  ${BMAG}+--------------------------------------------------------------+"
 echo -e "  |${RST}  ${BGRN}Installation Complete!${RST}                                      ${BMAG}|"
