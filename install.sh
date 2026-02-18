@@ -554,6 +554,25 @@ else
 fi
 
 # =========================================================================
+#  Playwright (headless browser for vision gate screenshots)
+# =========================================================================
+section "Playwright"
+if python3 -c "from playwright.sync_api import sync_playwright" 2>/dev/null; then
+    log_ok "Playwright already installed"
+else
+    log_run "Installing Playwright (headless browser for screenshots)..."
+    pip install --user --break-system-packages playwright 2>/dev/null \
+        || pip install --user playwright 2>/dev/null \
+        || pip install playwright 2>/dev/null \
+        || { log_warn "Could not install Playwright — vision gate will be disabled"; true; }
+    if python3 -c "import playwright" 2>/dev/null; then
+        python3 -m playwright install chromium 2>/dev/null \
+            && log_ok "Playwright + Chromium installed" \
+            || log_warn "Playwright installed but Chromium browser failed"
+    fi
+fi
+
+# =========================================================================
 #  Persist remote config
 # =========================================================================
 if [ "$REMOTE_MODE" = true ] && [ -n "${OLLAMA_HOST:-}" ]; then

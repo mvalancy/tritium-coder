@@ -100,6 +100,7 @@ SESSION_ID="iterate-${PROJECT_NAME}-$(date +%s)"
 LOG_FILE="$LOG_DIR/iterate-${PROJECT_NAME}.log"
 CYCLE=0
 VISION_FEEDBACK=""
+CYCLE_HISTORY=""   # Running log of what was done each cycle (fed to agent for memory)
 
 # =============================================================================
 #  Helpers
@@ -108,6 +109,40 @@ VISION_FEEDBACK=""
 log_to() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 elapsed_secs() { echo $(( $(date +%s) - START_TIME )); }
 time_remaining() { echo $(( DURATION_SECS - $(elapsed_secs) )); }
+
+# Append to cycle history (keeps last 10 entries to avoid prompt bloat)
+record_cycle() {
+    local entry="Cycle #${CYCLE} (${1}): ${2}"
+    CYCLE_HISTORY="${CYCLE_HISTORY}
+${entry}"
+    # Trim to last 10 lines
+    CYCLE_HISTORY=$(echo "$CYCLE_HISTORY" | tail -10)
+}
+
+# Build a context prefix shared by all prompts: CLAUDE.md + cycle history
+prompt_context() {
+    local ctx=""
+
+    # Include CLAUDE.md if it exists in the output dir or its parent
+    for candidate in "${OUTPUT_DIR}/CLAUDE.md" "${OUTPUT_DIR}/../CLAUDE.md"; do
+        if [ -f "$candidate" ]; then
+            ctx="IMPORTANT: Read ${candidate} first for project context.
+
+"
+            break
+        fi
+    done
+
+    # Include cycle history so the agent remembers what it already did
+    if [ -n "$CYCLE_HISTORY" ]; then
+        ctx="${ctx}PREVIOUS ITERATIONS (what you already did — do NOT repeat, build on it):
+${CYCLE_HISTORY}
+
+"
+    fi
+
+    echo "$ctx"
+}
 
 agent_code() {
     local prompt="$1"
@@ -492,8 +527,10 @@ vision_review() {
 # =============================================================================
 
 prompt_generate() {
+    local ctx
+    ctx=$(prompt_context)
     cat << PROMPT
-Build this project from scratch:
+${ctx}Build this project from scratch:
 
 ${DESCRIPTION}
 
@@ -507,13 +544,13 @@ Requirements:
 - Must work by opening index.html in a browser — fully self-contained
 - Add sound effects using Web Audio API (synthesized, no audio files)
 
-If a CLAUDE.md file exists in the output directory, read it first for project context.
-
 Write ALL files now. Make sure the project works immediately.
 PROMPT
 }
 
 prompt_fix() {
+    local ctx
+    ctx=$(prompt_context)
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
@@ -523,7 +560,7 @@ ${VISION_FEEDBACK}
 Fix every issue the vision model identified."
 
     cat << PROMPT
-You are iterating on a project in ${OUTPUT_DIR}.
+${ctx}You are iterating on a project in ${OUTPUT_DIR}.
 
 Read ALL source files in ${OUTPUT_DIR} to understand the current state.
 
@@ -543,6 +580,8 @@ PROMPT
 }
 
 prompt_improve() {
+    local ctx
+    ctx=$(prompt_context)
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
@@ -552,7 +591,7 @@ ${VISION_FEEDBACK}
 Address the visual feedback above."
 
     cat << PROMPT
-You are iterating on a project in ${OUTPUT_DIR}.
+${ctx}You are iterating on a project in ${OUTPUT_DIR}.
 
 Read ALL source files. The project should already work. Now improve it:
 
@@ -572,8 +611,10 @@ PROMPT
 }
 
 prompt_test() {
+    local ctx
+    ctx=$(prompt_context)
     cat << PROMPT
-You are testing a project in ${OUTPUT_DIR}.
+${ctx}You are testing a project in ${OUTPUT_DIR}.
 
 Read ALL source files. Create or update ${OUTPUT_DIR}/test.html.
 
@@ -606,6 +647,8 @@ PROMPT
 }
 
 prompt_features() {
+    local ctx
+    ctx=$(prompt_context)
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
@@ -613,7 +656,7 @@ VISION MODEL FEEDBACK:
 ${VISION_FEEDBACK}"
 
     cat << PROMPT
-You are adding features to a project in ${OUTPUT_DIR}.
+${ctx}You are adding features to a project in ${OUTPUT_DIR}.
 
 Read ALL source files. The project should be stable. Now add NEW FEATURES:
 
@@ -632,6 +675,8 @@ PROMPT
 }
 
 prompt_polish() {
+    local ctx
+    ctx=$(prompt_context)
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
@@ -639,7 +684,7 @@ VISION MODEL REVIEW:
 ${VISION_FEEDBACK}"
 
     cat << PROMPT
-Final polish pass on the project in ${OUTPUT_DIR}.
+${ctx}Final polish pass on the project in ${OUTPUT_DIR}.
 
 Read ALL source files. This is a quality review:
 
@@ -655,6 +700,71 @@ Write all changes to ${OUTPUT_DIR}.${vision_section}
 
 Rate the project 1-10 and explain what would bring it to a 10.
 PROMPT
+}
+
+prompt_runtests() {
+    local ctx
+    ctx=$(prompt_context)
+
+    # Detect what kind of tests exist
+    local test_info=""
+    if [ -f "${OUTPUT_DIR}/test.html" ]; then
+        test_info="A test.html file exists — it uses the TritiumTest harness."
+    fi
+    if [ -f "${OUTPUT_DIR}/package.json" ]; then
+        test_info="${test_info} A package.json exists — check for test scripts."
+    fi
+    for f in "${OUTPUT_DIR}"/*test*.py "${OUTPUT_DIR}"/test_*.py "${OUTPUT_DIR}"/tests/*.py; do
+        if [ -f "$f" ] 2>/dev/null; then
+            test_info="${test_info} Python test files found."
+            break
+        fi
+    done
+
+    cat << PROMPT
+${ctx}You are running tests for a project in ${OUTPUT_DIR}.
+
+${test_info}
+
+YOUR JOB: Actually EXECUTE the tests and fix what's broken.
+
+1. If test.html exists, open it with a headless check or read it to understand what's tested
+2. If Python tests exist, run them: cd ${OUTPUT_DIR} && python3 -m pytest or python3 test_*.py
+3. If package.json has test scripts, run: cd ${OUTPUT_DIR} && npm test
+4. If no tests exist yet, CREATE them first (use ${PROJECT_DIR}/lib/test-harness.js for web projects)
+5. Run: python3 -c "import py_compile; py_compile.compile('${OUTPUT_DIR}/FILE', doraise=True)" for Python files
+6. For JS/HTML: check for syntax errors by reading the code carefully
+
+For ANY test failure:
+- Read the error output
+- Find the root cause in the source code
+- FIX the bug
+- Re-run to verify the fix works
+
+Write all fixes to ${OUTPUT_DIR}.
+
+Report: which tests passed, which failed, what you fixed.
+PROMPT
+}
+
+# Git checkpoint: commit working state after successful cycles
+git_checkpoint() {
+    local msg="$1"
+
+    # Only checkpoint if output dir is inside a git repo
+    if ! git -C "$OUTPUT_DIR" rev-parse --git-dir &>/dev/null; then
+        return
+    fi
+
+    local changes
+    changes=$(git -C "$OUTPUT_DIR" status --porcelain 2>/dev/null | wc -l)
+    if [ "$changes" -eq 0 ]; then
+        return
+    fi
+
+    git -C "$OUTPUT_DIR" add -A 2>/dev/null || return
+    git -C "$OUTPUT_DIR" commit -m "[auto] ${msg}" --no-verify 2>/dev/null || return
+    log_to "GIT    checkpoint: ${msg} (${changes} files)"
 }
 
 # =============================================================================
@@ -732,7 +842,11 @@ fi
 #  Vision gate runs AFTER test and polish phases (when the agent thinks it's good)
 # =============================================================================
 
-PHASES=("fix" "improve" "test" "features" "polish")
+# Phases rotate: fix → improve → runtests → features → polish → test (write tests)
+# "runtests" actually executes tests and fixes failures
+# "test" writes/updates test files
+# Vision gate fires after polish and runtests (agent thinks it's in good shape)
+PHASES=("fix" "improve" "runtests" "features" "polish" "test")
 
 while [ "$(time_remaining)" -gt 300 ]; do
     CYCLE=$((CYCLE + 1))
@@ -753,6 +867,7 @@ while [ "$(time_remaining)" -gt 300 ]; do
         fix)      local_prompt=$(prompt_fix) ;;
         improve)  local_prompt=$(prompt_improve) ;;
         test)     local_prompt=$(prompt_test) ;;
+        runtests) local_prompt=$(prompt_runtests) ;;
         features) local_prompt=$(prompt_features) ;;
         polish)   local_prompt=$(prompt_polish) ;;
     esac
@@ -766,24 +881,34 @@ while [ "$(time_remaining)" -gt 300 ]; do
 
     if [ -n "$response" ]; then
         log_to "CODE   response_len=${#response}"
-        # Print summary
-        echo "$response" | python3 -c "
+        # Extract summary for cycle history
+        local summary
+        summary=$(echo "$response" | python3 -c "
 import sys,json
 try:
     data = json.load(sys.stdin)
     text = data.get('content','') or data.get('result','') or str(data)
-    print(text[:500])
+    print(text[:200])
 except:
-    print(sys.stdin.read()[:500])
-" 2>/dev/null || echo "$response" | head -c 500
+    text = sys.stdin.read()
+    print(text[:200])
+" 2>/dev/null || echo "$response" | head -c 200)
+        echo "$summary"
         echo ""
+        record_cycle "$phase" "$summary"
     else
         log_to "CODE   response=EMPTY (may have timed out)"
+        record_cycle "$phase" "No response (timeout or error)"
     fi
 
-    # ----- VISION GATE (only after test or polish — when the agent thinks it's good) -----
-    if [ "$phase" = "test" ] || [ "$phase" = "polish" ]; then
-        log_to "VISION GATE triggered after ${phase} phase (agent thinks it's ready)"
+    # ----- GIT CHECKPOINT (after improve, features, polish — constructive phases) -----
+    if [ "$phase" = "improve" ] || [ "$phase" = "features" ] || [ "$phase" = "polish" ]; then
+        git_checkpoint "cycle-${CYCLE}-${phase}"
+    fi
+
+    # ----- VISION GATE (only after runtests or polish — when the agent thinks it's good) -----
+    if [ "$phase" = "runtests" ] || [ "$phase" = "polish" ]; then
+        log_to "VISION GATE triggered after ${phase} phase"
         run_vision_gate
         # If vision produced feedback, run an immediate fix pass to address it
         if [ -n "$VISION_FEEDBACK" ]; then
@@ -796,7 +921,11 @@ except:
             if [ "$iter_timeout" -gt 60 ]; then
                 response=$(agent_code "$local_prompt" "$iter_timeout")
                 log_to "VISION FIX response_len=${#response}"
+                record_cycle "vision-fix" "Fixed issues from vision review"
+                git_checkpoint "cycle-${CYCLE}-vision-fix"
             fi
+            # Clear vision feedback after it's been addressed
+            VISION_FEEDBACK=""
         fi
     fi
 
@@ -810,6 +939,9 @@ done
 
 TOTAL_TIME=$(elapsed_secs)
 log_to "DONE   cycles=${CYCLE} total_time=${TOTAL_TIME}s"
+
+# Final git checkpoint
+git_checkpoint "final — ${CYCLE} cycles in $((TOTAL_TIME / 60))m"
 
 echo ""
 echo "=========================================="
