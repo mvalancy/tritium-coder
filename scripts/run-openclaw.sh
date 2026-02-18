@@ -9,12 +9,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# --- Help ---
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    banner
+    echo -e "  ${BOLD}scripts/run-openclaw.sh${RST} — Launch OpenClaw agent with local model"
+    echo ""
+    echo -e "  Starts the OpenClaw coding agent connected to the local Ollama model."
+    echo -e "  Runs fully offline with hardened security settings."
+    echo ""
+    echo -e "  ${BOLD}Usage:${RST}  scripts/run-openclaw.sh [message]"
+    echo ""
+    echo -e "  ${BOLD}Examples:${RST}"
+    echo -e "    ${CYN}scripts/run-openclaw.sh${RST}                          Interactive session"
+    echo -e "    ${CYN}scripts/run-openclaw.sh \"Build a Flask app in /tmp\"${RST}  One-shot task"
+    echo ""
+    echo -e "  ${BOLD}Requires:${RST}  Ollama running (${CYN}./start${RST}), OpenClaw installed"
+    echo ""
+    exit 0
+fi
+
 banner
 
 # --- Preflight checks ---
-if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+if ! curl_check http://localhost:11434/api/tags &>/dev/null; then
     log_fail "Ollama is not running."
-    log_info "Run ${CYN}./start.sh${RST} first."
+    log_info "Run ${CYN}./start${RST} first."
     exit 1
 fi
 
@@ -33,26 +52,23 @@ fi
 log_ok "Ollama running"
 log_ok "OpenClaw installed"
 
+GW_BIND=$(get_gateway_bind)
+
 # --- Apply hardened local-only config ---
 OC_CONFIG="$HOME/.openclaw/openclaw.json"
 if [ ! -f "$OC_CONFIG" ]; then
     log_run "Applying hardened local-only config to ~/.openclaw/openclaw.json"
     mkdir -p "$HOME/.openclaw"
-    cp "$CONFIG_DIR/openclaw.json" "$OC_CONFIG"
+    sed -e "s/qwen3-coder-next/${OLLAMA_MODEL_NAME}/g" \
+        -e "s/\"bind\": \"loopback\"/\"bind\": \"${GW_BIND}\"/" \
+        "$CONFIG_DIR/openclaw.json" > "$OC_CONFIG"
     log_ok "Hardened config applied"
 else
-    # Check if it has our security settings
-    if ! grep -q '"enabled": false' "$OC_CONFIG" 2>/dev/null || ! grep -q '"workspaceOnly": true' "$OC_CONFIG" 2>/dev/null; then
-        log_warn "Existing config may not have security hardening."
-        log_info "Our hardened config is at: ${CYN}config/openclaw.json${RST}"
-        log_info "To apply: ${CYN}cp config/openclaw.json ~/.openclaw/openclaw.json${RST}"
-    else
-        log_ok "Using hardened config at ~/.openclaw/openclaw.json"
-    fi
+    log_ok "Using config at ~/.openclaw/openclaw.json"
 fi
 
 echo ""
-echo -e "  ${DIM}Connecting OpenClaw to local Qwen3-Coder-Next...${RST}"
+echo -e "  ${DIM}Connecting OpenClaw to local model...${RST}"
 echo -e "  ${DIM}Model:  ollama/${OLLAMA_MODEL_NAME}${RST}"
 echo -e "  ${DIM}Mode:   Fully offline -- no cloud APIs${RST}"
 echo ""
@@ -61,23 +77,29 @@ echo -e "    ${BGRN}[OK]${RST}  Web search / fetch    ${DIM}enabled (research on
 echo -e "    ${BGRN}[OK]${RST}  Browser automation    ${DIM}disabled${RST}"
 echo -e "    ${BGRN}[OK]${RST}  Shell execution       ${DIM}full (no sudo/elevated)${RST}"
 echo -e "    ${BGRN}[OK]${RST}  Filesystem access     ${DIM}local only (loopback)${RST}"
-echo -e "    ${BGRN}[OK]${RST}  Network access        ${DIM}localhost only (add tailscale serve for remote)${RST}"
+echo -e "    ${BGRN}[OK]${RST}  Network access        ${DIM}localhost only${RST}"
 echo -e "    ${BGRN}[OK]${RST}  Elevated permissions  ${DIM}disabled${RST}"
 echo ""
 
 # --- Start gateway in background if not already running ---
-GATEWAY_PORT=18789
 if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
     log_ok "OpenClaw gateway already running on port ${GATEWAY_PORT}"
 else
-    log_run "Starting OpenClaw gateway..."
+    log_run "Starting OpenClaw gateway (bind ${GW_BIND})..."
     ensure_dir "$LOG_DIR"
     (
         cd "$PROJECT_DIR"
-        nohup openclaw gateway run --bind loopback > "$LOG_DIR/openclaw-gateway.log" 2>&1 &
+        nohup openclaw gateway run --bind "$GW_BIND" > "$LOG_DIR/openclaw-gateway.log" 2>&1 &
         echo $! > "$LOG_DIR/openclaw-gateway.pid"
     )
-    sleep 4
+
+    for i in $(seq 1 8); do
+        if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
+            break
+        fi
+        sleep 1
+    done
+
     if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
         log_ok "Gateway started on port ${GATEWAY_PORT}"
     else
@@ -89,7 +111,11 @@ fi
 export OLLAMA_API_KEY="ollama-local"
 export OPENCLAW_GATEWAY_TOKEN="tritium-local-dev"
 
-MSG="${1:-Hello! I am ready to help you code. Ask me to write, review, or debug code for any project.}"
+if [ $# -gt 0 ]; then
+    MSG="$*"
+else
+    MSG="Hello! I am ready to help you code. Ask me to write, review, or debug code for any project."
+fi
 
 exec openclaw agent \
     --local \
