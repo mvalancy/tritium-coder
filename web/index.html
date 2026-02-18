@@ -10,6 +10,7 @@
     --surface: #12121a;
     --surface2: #1a1a25;
     --border: #2a2a3a;
+    --border-hover: #3a3a50;
     --text: #e0e0e8;
     --dim: #666680;
     --green: #4ade80;
@@ -27,6 +28,8 @@
     min-height: 100vh;
     padding: 24px;
   }
+
+  /* --- Header --- */
   .header {
     display: flex;
     align-items: center;
@@ -35,19 +38,43 @@
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border);
   }
-  .header h1 {
-    font-size: 24px;
-    font-weight: 700;
+  .header h1 { font-size: 24px; font-weight: 700; }
+  .header h1 a {
+    text-decoration: none;
     background: linear-gradient(135deg, var(--cyan), var(--purple));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    background-clip: text;
+    transition: filter 0.2s, transform 0.2s;
+    display: inline-block;
   }
+  .header h1 a:hover {
+    filter: brightness(1.3);
+    transform: translateY(-1px);
+  }
+  .header h1 a::after {
+    content: ' \2197';
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    -webkit-text-fill-color: var(--dim);
+  }
+  .header h1 a:hover::after { opacity: 1; }
   .header .subtitle {
     color: var(--dim);
     font-size: 12px;
     margin-top: 4px;
   }
-  .header-actions { display: flex; gap: 8px; }
+  .header-actions { display: flex; gap: 8px; align-items: center; }
+  .header-status {
+    font-size: 11px;
+    color: var(--dim);
+    margin-right: 12px;
+    transition: color 0.3s;
+  }
+  .header-status.all-ok { color: var(--green); }
+
+  /* --- Grid & Cards --- */
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -59,6 +86,11 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 20px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .card:hover {
+    border-color: var(--border-hover);
+    box-shadow: 0 2px 16px rgba(0,0,0,0.3);
   }
   .card h2 {
     font-size: 13px;
@@ -67,27 +99,50 @@
     color: var(--dim);
     margin-bottom: 16px;
   }
+
+  /* --- Services --- */
   .service-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 0;
+    padding: 10px 8px;
     border-bottom: 1px solid var(--border);
+    border-radius: 4px;
+    transition: background 0.2s;
   }
   .service-row:last-child { border-bottom: none; }
+  .service-row:hover { background: var(--surface2); }
   .service-name { font-weight: 600; font-size: 14px; }
-  .service-detail { color: var(--dim); font-size: 12px; }
+  .service-detail {
+    color: var(--dim);
+    font-size: 12px;
+    transition: color 0.3s;
+  }
   .status-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
     display: inline-block;
     margin-right: 8px;
+    transition: background 0.3s, box-shadow 0.3s;
   }
-  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .status-dot.err { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .status-dot.ok {
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: breathe 3s ease-in-out infinite;
+  }
+  .status-dot.err {
+    background: var(--red);
+    box-shadow: 0 0 6px var(--red);
+  }
   .status-dot.warn { background: var(--yellow); }
-  .status-dot.checking { background: var(--dim); animation: pulse 1s infinite; }
+  .status-dot.checking {
+    background: var(--dim);
+    animation: pulse 1s infinite;
+  }
   @keyframes pulse { 50% { opacity: 0.3; } }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+  /* --- Buttons --- */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -101,15 +156,45 @@
     font-size: 13px;
     cursor: pointer;
     text-decoration: none;
-    transition: all 0.15s;
+    transition: all 0.2s;
+    position: relative;
   }
-  .btn:hover { background: var(--border); border-color: var(--dim); }
+  .btn:hover {
+    background: var(--border);
+    border-color: var(--dim);
+    transform: translateY(-1px);
+  }
+  .btn:active { transform: translateY(0); }
   .btn.primary {
     background: var(--purple);
     border-color: var(--purple);
     color: #fff;
   }
-  .btn.primary:hover { opacity: 0.85; }
+  .btn.primary:hover { background: #b79cfc; border-color: #b79cfc; }
+  .btn.primary:disabled, .btn.primary[href="#"] {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn .copied-flash {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--green);
+    color: #000;
+    border-radius: 5px;
+    font-weight: 600;
+    animation: flashIn 0.8s ease forwards;
+  }
+  @keyframes flashIn {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; pointer-events: none; }
+  }
+
+  /* --- Resources --- */
   .resource-bar {
     height: 6px;
     background: var(--surface2);
@@ -120,7 +205,7 @@
   .resource-bar .fill {
     height: 100%;
     border-radius: 3px;
-    transition: width 0.5s;
+    transition: width 0.8s ease, background 0.5s;
   }
   .resource-item {
     padding: 10px 0;
@@ -133,7 +218,15 @@
     font-size: 13px;
     margin-bottom: 4px;
   }
+  .resource-label span:last-child {
+    color: var(--dim);
+    transition: color 0.3s;
+  }
+
+  /* --- Quick Actions --- */
   .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* --- Model Info --- */
   .model-info {
     padding: 12px;
     background: var(--surface2);
@@ -142,7 +235,13 @@
     line-height: 1.8;
   }
   .model-info .label { color: var(--dim); }
-  .model-info .value { color: var(--cyan); font-weight: 600; }
+  .model-info .value {
+    color: var(--cyan);
+    font-weight: 600;
+    transition: color 0.3s;
+  }
+
+  /* --- Activity Log --- */
   .log-area {
     background: var(--surface2);
     border-radius: 6px;
@@ -152,47 +251,69 @@
     max-height: 200px;
     overflow-y: auto;
     color: var(--dim);
+    scroll-behavior: smooth;
   }
-  .log-area .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-area .log-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+    animation: fadeIn 0.3s ease;
+  }
   .log-area .log-line.ok { color: var(--green); }
   .log-area .log-line.err { color: var(--red); }
   .log-area .log-line.info { color: var(--blue); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
   .wide { grid-column: 1 / -1; }
-  .session-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-  }
-  .session-row:last-child { border-bottom: none; }
-  .session-id { color: var(--cyan); }
-  .session-time { color: var(--dim); font-size: 12px; }
-  .empty-state {
-    color: var(--dim);
-    text-align: center;
-    padding: 24px;
-    font-size: 13px;
-  }
   .refresh-note {
     color: var(--dim);
     font-size: 11px;
     text-align: right;
     margin-top: 12px;
   }
+
+  /* --- Tooltip --- */
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 10px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: tipIn 0.15s ease;
+    z-index: 10;
+  }
+  [data-tip]:hover::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: var(--text);
+    z-index: 10;
+  }
+  @keyframes tipIn { from { opacity: 0; transform: translateX(-50%) translateY(2px); } to { opacity: 1; transform: translateX(-50%); } }
 </style>
 </head>
 <body>
 
 <div class="header">
   <div>
-    <h1><a href="https://github.com/mvalancy/tritium-coder" target="_blank" style="text-decoration:none;-webkit-text-fill-color:inherit">Tritium Coder</a></h1>
+    <h1><a href="https://github.com/mvalancy/tritium-coder" target="_blank" data-tip="View on GitHub">Tritium Coder</a></h1>
     <div class="subtitle">Local AI Coding Stack &mdash; Control Panel</div>
   </div>
   <div class="header-actions">
-    <a class="btn primary" id="btn-dashboard" href="#" target="_blank">Open Chat Dashboard</a>
-    <button class="btn" onclick="refreshAll()">Refresh</button>
+    <span class="header-status" id="header-status"></span>
+    <a class="btn primary" id="btn-dashboard" href="#" target="_blank" data-tip="Open the OpenClaw chat UI">Open Chat Dashboard</a>
+    <button class="btn" onclick="refreshAll()" data-tip="Check all services now">Refresh</button>
   </div>
 </div>
 
@@ -201,15 +322,15 @@
   <div class="card">
     <h2>Services</h2>
     <div id="services">
-      <div class="service-row">
+      <div class="service-row" data-tip="Model server on port 11434">
         <div><span class="status-dot checking" id="dot-ollama"></span><span class="service-name">Ollama</span></div>
         <span class="service-detail" id="detail-ollama">checking...</span>
       </div>
-      <div class="service-row">
+      <div class="service-row" data-tip="Translates Anthropic API calls to OpenAI format">
         <div><span class="status-dot checking" id="dot-proxy"></span><span class="service-name">Proxy</span></div>
         <span class="service-detail" id="detail-proxy">checking...</span>
       </div>
-      <div class="service-row">
+      <div class="service-row" data-tip="Agent manager, chat dashboard, exec approvals">
         <div><span class="status-dot checking" id="dot-gateway"></span><span class="service-name">Gateway</span></div>
         <span class="service-detail" id="detail-gateway">checking...</span>
       </div>
@@ -236,14 +357,14 @@
           <span>Memory</span>
           <span id="mem-detail">--</span>
         </div>
-        <div class="resource-bar"><div class="fill" id="mem-bar" style="width:0%;background:var(--green)"></div></div>
+        <div class="resource-bar"><div class="fill" id="mem-bar" style="width:0%"></div></div>
       </div>
       <div class="resource-item">
         <div class="resource-label">
           <span>GPU</span>
           <span id="gpu-detail">--</span>
         </div>
-        <div class="resource-bar"><div class="fill" id="gpu-bar" style="width:0%;background:var(--purple)"></div></div>
+        <div class="resource-bar"><div class="fill" id="gpu-bar" style="width:0%"></div></div>
       </div>
     </div>
   </div>
@@ -252,11 +373,11 @@
   <div class="card">
     <h2>Quick Actions</h2>
     <div class="quick-actions">
-      <a class="btn primary" id="btn-chat" href="#" target="_blank">Chat with Agent</a>
-      <button class="btn" onclick="copyCmd('scripts/run-openclaw.sh')">Copy: Terminal Agent</button>
-      <button class="btn" onclick="copyCmd('scripts/run-claude.sh')">Copy: Claude Code</button>
-      <button class="btn" onclick="copyCmd('./test')">Copy: Run Tests</button>
-      <button class="btn" onclick="copyCmd('tail -f logs/openclaw-gateway.log')">Copy: Tail Logs</button>
+      <a class="btn primary" id="btn-chat" href="#" target="_blank" data-tip="Open chat in a new tab">Chat with Agent</a>
+      <button class="btn" onclick="copyCmd(this, 'scripts/run-openclaw.sh')" data-tip="Copy command to clipboard">Terminal Agent</button>
+      <button class="btn" onclick="copyCmd(this, 'scripts/run-claude.sh')" data-tip="Copy command to clipboard">Claude Code</button>
+      <button class="btn" onclick="copyCmd(this, './test')" data-tip="Copy command to clipboard">Run Tests</button>
+      <button class="btn" onclick="copyCmd(this, 'tail -f logs/openclaw-gateway.log')" data-tip="Copy command to clipboard">Tail Logs</button>
     </div>
   </div>
 
@@ -266,7 +387,7 @@
     <div class="log-area" id="activity-log">
       <div class="log-line info">Control panel loaded. Checking services...</div>
     </div>
-    <div class="refresh-note">Auto-refreshes every 15 seconds</div>
+    <div class="refresh-note" id="refresh-note">Auto-refreshes every 15s</div>
   </div>
 </div>
 
@@ -275,7 +396,8 @@ const OLLAMA_URL = 'http://localhost:11434';
 const PROXY_URL = 'http://localhost:8082';
 const GATEWAY_URL = 'http://localhost:18789';
 const GATEWAY_TOKEN = 'tritium-local-dev';
-let MODEL_NAME = ''; // auto-detected from Ollama
+let MODEL_NAME = '';
+let refreshCount = 0;
 
 function $(id) { return document.getElementById(id); }
 
@@ -286,13 +408,11 @@ function log(msg, cls = '') {
   line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
   area.appendChild(line);
   area.scrollTop = area.scrollHeight;
-  // Keep last 50 lines
   while (area.children.length > 50) area.removeChild(area.firstChild);
 }
 
 function setDot(id, status) {
-  const dot = $(id);
-  dot.className = 'status-dot ' + status;
+  $(id).className = 'status-dot ' + status;
 }
 
 async function checkOllama() {
@@ -303,7 +423,6 @@ async function checkOllama() {
       setDot('dot-ollama', 'ok');
       $('detail-ollama').textContent = `:11434 (${data.models?.length || 0} models)`;
 
-      // Check if any model is currently loaded (running)
       let loadedModel = null;
       try {
         const ps = await fetch(OLLAMA_URL + '/api/ps', { signal: AbortSignal.timeout(3000) });
@@ -314,7 +433,6 @@ async function checkOllama() {
         }
       } catch {}
 
-      // Show model info: prefer loaded model, fall back to largest installed
       const model = loadedModel
         ? data.models?.find(m => m.name === loadedModel.name)
         : data.models?.sort((a, b) => (b.size || 0) - (a.size || 0))?.[0];
@@ -326,11 +444,12 @@ async function checkOllama() {
         $('model-size').textContent = sizeGB + ' GB';
         $('model-tools').textContent = 'Yes (native)';
         $('model-status').textContent = loadedModel ? 'Loaded (GPU)' : 'Available (not loaded)';
+        $('model-status').style.color = loadedModel ? 'var(--green)' : 'var(--yellow)';
       } else {
         $('model-name').textContent = 'No models installed';
         $('model-status').textContent = '--';
+        $('model-status').style.color = '';
       }
-
       return true;
     }
   } catch (e) {
@@ -338,6 +457,7 @@ async function checkOllama() {
     $('detail-ollama').textContent = 'not running';
     $('model-name').textContent = '--';
     $('model-status').textContent = 'Ollama offline';
+    $('model-status').style.color = 'var(--red)';
   }
   return false;
 }
@@ -354,7 +474,6 @@ async function checkProxy() {
       return true;
     }
   } catch {
-    // Try a simpler check
     try {
       const res2 = await fetch(PROXY_URL, { signal: AbortSignal.timeout(3000) });
       setDot('dot-proxy', 'ok');
@@ -390,21 +509,20 @@ async function checkGateway() {
 }
 
 function updateResources() {
-  // Show model loading status based on Ollama ps data
   const modelStatus = $('model-status').textContent;
   const modelSize = $('model-size').textContent;
   if (modelStatus.includes('Loaded')) {
-    $('mem-detail').textContent = modelSize + ' (model loaded in GPU memory)';
+    $('mem-detail').textContent = modelSize + ' (model in GPU memory)';
     $('mem-bar').style.width = '60%';
     $('mem-bar').style.background = 'var(--green)';
-    $('gpu-detail').textContent = 'Active — model loaded';
+    $('gpu-detail').textContent = 'Active';
     $('gpu-bar').style.width = '60%';
     $('gpu-bar').style.background = 'var(--purple)';
   } else if (modelStatus.includes('Available')) {
     $('mem-detail').textContent = 'Model downloaded, not loaded';
     $('mem-bar').style.width = '5%';
     $('mem-bar').style.background = 'var(--dim)';
-    $('gpu-detail').textContent = 'Idle — run ./start to load model';
+    $('gpu-detail').textContent = 'Idle';
     $('gpu-bar').style.width = '5%';
     $('gpu-bar').style.background = 'var(--dim)';
   } else {
@@ -416,24 +534,39 @@ function updateResources() {
 }
 
 async function refreshAll() {
+  refreshCount++;
   const ollamaOk = await checkOllama();
   const proxyOk = await checkProxy();
   const gatewayOk = await checkGateway();
   updateResources();
 
   const total = [ollamaOk, proxyOk, gatewayOk].filter(Boolean).length;
+  const hs = $('header-status');
   if (total === 3) {
-    log('All services healthy', 'ok');
+    hs.textContent = `${total}/3 healthy`;
+    hs.className = 'header-status all-ok';
+    if (refreshCount <= 1) log('All services healthy', 'ok');
   } else if (total > 0) {
+    hs.textContent = `${total}/3 running`;
+    hs.className = 'header-status';
     log(`${total}/3 services running`, 'info');
   } else {
+    hs.textContent = '0/3 running';
+    hs.className = 'header-status';
     log('No services detected. Run ./start', 'err');
   }
+  $('refresh-note').textContent = `Last checked ${new Date().toLocaleTimeString()} \u00b7 auto-refreshes every 15s`;
 }
 
-function copyCmd(cmd) {
+function copyCmd(btn, cmd) {
   if (navigator.clipboard) {
     navigator.clipboard.writeText(cmd).then(() => {
+      // Flash "Copied" over the button
+      const flash = document.createElement('span');
+      flash.className = 'copied-flash';
+      flash.textContent = 'Copied!';
+      btn.appendChild(flash);
+      setTimeout(() => flash.remove(), 800);
       log(`Copied: ${cmd}`, 'ok');
     }).catch(() => {
       log(`Run in terminal: ${cmd}`, 'info');
