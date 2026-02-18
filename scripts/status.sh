@@ -57,14 +57,6 @@ else
     log_fail "Claude Code proxy   ${RED}stopped${RST}"
 fi
 
-# --- OpenClaw Gateway ---
-if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
-    log_ok "OpenClaw gateway    ${BGRN}running${RST}  ${DIM}http://localhost:${GATEWAY_PORT}${RST}"
-    log_info "Chat dashboard      ${DIM}openclaw dashboard${RST}"
-else
-    log_fail "OpenClaw gateway    ${RED}stopped${RST}"
-fi
-
 # --- Control Panel ---
 if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
     log_ok "Control panel       ${BGRN}running${RST}  ${DIM}http://localhost:${PANEL_PORT}${RST}"
@@ -97,9 +89,6 @@ if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
 else
     log_info "Control panel       ${DIM}not running${RST}  ${DIM}(start with: ./dashboard)${RST}"
 fi
-if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
-    log_info "Chat dashboard      ${CYN}http://localhost:${GATEWAY_PORT}/#token=tritium-local-dev${RST}"
-fi
 log_info "Ollama API          ${CYN}http://localhost:11434${RST}"
 log_info "Proxy API           ${CYN}http://localhost:${PROXY_PORT}${RST}"
 
@@ -116,9 +105,6 @@ if command -v tailscale &>/dev/null; then
             log_ok "Tailscale           ${BGRN}online${RST}  ${DIM}${TS_NAME}${RST}"
             [ -n "$TS_IP" ] && log_info "Tailscale IP        ${CYN}${TS_IP}${RST}"
             log_info "Remote panel        ${CYN}http://${TS_NAME}:${PANEL_PORT}${RST}"
-            if ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
-                log_info "Remote chat         ${CYN}http://${TS_NAME}:${GATEWAY_PORT}/#token=tritium-local-dev${RST}"
-            fi
         else
             log_warn "Tailscale           ${YLW}installed but offline${RST}"
         fi
@@ -134,28 +120,18 @@ section "Quick Commands"
 log_info "Start stack         ${BOLD}./start${RST}"
 log_info "Stop stack          ${BOLD}./stop${RST}"
 log_info "Control panel       ${BOLD}./dashboard${RST}"
-log_info "Chat dashboard      ${BOLD}openclaw dashboard${RST}"
 log_info "Run tests           ${BOLD}./test${RST}"
 echo ""
 log_info "Claude Code session ${BOLD}scripts/run-claude.sh${RST}"
 log_info "  (in a project)    ${BOLD}scripts/run-claude.sh -p /path/to/project${RST}"
-log_info "OpenClaw agent      ${BOLD}scripts/run-openclaw.sh${RST}"
+log_info "Build a project     ${BOLD}./iterate \"Build a Tetris game\" --hours 4${RST}"
 echo ""
-log_info "Tail logs           ${BOLD}tail -f logs/openclaw-gateway.log${RST}"
-log_info "                    ${BOLD}openclaw logs --follow${RST}"
-
-section "Submit Jobs"
-
-log_info "Interactive chat    ${BOLD}scripts/run-openclaw.sh${RST}"
-log_info "One-shot job        ${BOLD}scripts/run-openclaw.sh \"Build a Flask app in /tmp/myapp\"${RST}"
-log_info "Headless (JSON)     ${BOLD}openclaw agent --message \"your task\" --json --timeout 600${RST}"
-log_info "Web chat            Open the ${CYN}Chat Dashboard${RST} link above"
-log_info "API (curl)          ${DIM}See docs/usage.md for direct API examples${RST}"
+log_info "Tail logs           ${BOLD}tail -f logs/proxy.log${RST}"
 
 section "Installed Components"
 
 # Check each tool
-for cmd_pair in "ollama:Ollama" "python3:Python" "node:Node.js" "claude:Claude Code CLI" "openclaw:OpenClaw" "git:Git"; do
+for cmd_pair in "ollama:Ollama" "python3:Python" "node:Node.js" "claude:Claude Code CLI" "git:Git"; do
     cmd="${cmd_pair%%:*}"
     name="${cmd_pair##*:}"
     if command -v "$cmd" &>/dev/null; then

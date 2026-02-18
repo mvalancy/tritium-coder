@@ -14,7 +14,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     banner
     echo -e "  ${BOLD}./stop${RST} — Stop all services and free GPU memory"
     echo ""
-    echo -e "  Stops the control panel, Claude Code proxy, and OpenClaw gateway."
+    echo -e "  Stops the control panel and Claude Code proxy."
     echo -e "  Unloads the model from GPU memory but leaves Ollama server running."
     echo -e "  Safe to run multiple times — already-stopped services are skipped."
     echo ""
@@ -30,7 +30,7 @@ fi
 
 banner
 tlog "--- stop.sh started ---"
-echo -e "  ${DIM}Stopping proxy, gateway, and panel. Unloading model from GPU memory.${RST}"
+echo -e "  ${DIM}Stopping proxy and panel. Unloading model from GPU memory.${RST}"
 echo ""
 
 section "Shutting Down"
@@ -56,19 +56,6 @@ else
     log_skip "Proxy was not running"
 fi
 rm -f "$LOG_DIR/proxy.pid"
-
-# --- Stop OpenClaw gateway ---
-if pgrep -f "openclaw.*gateway" &>/dev/null; then
-    pkill -f "openclaw.*gateway" 2>/dev/null || true
-    sleep 1
-    if pgrep -f "openclaw.*gateway" &>/dev/null; then
-        pkill -9 -f "openclaw.*gateway" 2>/dev/null || true
-    fi
-    log_ok "OpenClaw gateway stopped"
-else
-    log_skip "Gateway was not running"
-fi
-rm -f "$LOG_DIR/openclaw-gateway.pid"
 
 # --- Unload model from Ollama (free memory, keep server) ---
 if curl_check http://localhost:11434/api/tags &>/dev/null; then

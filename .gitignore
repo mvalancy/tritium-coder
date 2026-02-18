@@ -1,9 +1,6 @@
 # Proxy (auto-cloned during install)
 .proxy/
 
-# OpenClaw (auto-cloned during install)
-.openclaw/
-
 # Generated examples (built by scripts/create-examples.sh)
 examples/*/
 

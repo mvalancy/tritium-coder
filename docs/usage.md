@@ -9,11 +9,9 @@
 ## Quick Reference
 
 ```bash
-./start                   # Start the AI stack (Ollama + proxy + gateway)
+./start                   # Start the AI stack (Ollama + proxy)
 ./dashboard               # Open control panel (service status, quick actions)
-openclaw dashboard        # Open OpenClaw chat dashboard
 scripts/run-claude.sh     # Launch Claude Code with local model (interactive terminal)
-scripts/run-openclaw.sh   # Launch OpenClaw agent (interactive terminal)
 ./iterate "description"   # Build any project from a text description
 ./stop                    # Stop everything and free memory
 ./status                  # Check what's running
@@ -31,13 +29,13 @@ The control panel is a lightweight web UI for monitoring the stack at a glance.
 ```
 
 **What it shows:**
-- **Services** — live status of Ollama, Proxy, and Gateway (green/red dots)
+- **Services** — live status of Ollama and Proxy (green/red dots)
 - **Model** — which model is loaded, size, tool calling support
 - **Resources** — estimated memory and GPU usage when model is loaded
-- **Quick Actions** — buttons to open chat, send test jobs, view logs, copy terminal commands
+- **Quick Actions** — buttons to launch Claude Code, iterate, run tests, view logs
 - **Activity Log** — timestamped event log, auto-refreshes every 15 seconds
 
-The panel runs on `http://localhost:18790` and polls the services directly from your browser. It's separate from the OpenClaw chat dashboard (port 18789).
+The panel runs on `http://localhost:18790` and polls the services directly from your browser.
 
 **Stop the panel:**
 ```bash
@@ -188,130 +186,7 @@ done
 
 ---
 
-## Workflow 3: OpenClaw (Autonomous Agent)
-
-OpenClaw runs the model as an autonomous coding agent. You give it a job, it writes code, runs commands, reads/edits files, and reports back. This is the "fire and forget" workflow — give it a task, let it work, review the results.
-
-### 1. Start the stack
-
-```bash
-scripts/start.sh             # Start Ollama (do this once)
-scripts/run-openclaw.sh      # Start gateway + launch agent
-```
-
-The script starts the OpenClaw gateway (port 18789) automatically if it isn't running, then drops you into an agent session.
-
-### 2. Give it a job
-
-**Interactive (default):** Just run the script and talk to it:
-
-```bash
-scripts/run-openclaw.sh
-```
-
-**One-shot:** Pass the task as an argument:
-
-```bash
-scripts/run-openclaw.sh "Build a Flask todo app with SQLite. Write it to /tmp/todo-app/app.py and tell me how to run it."
-```
-
-**Headless (background):** Run a job and capture JSON output:
-
-```bash
-openclaw agent \
-  --session-id "my-job" \
-  --message "Write a REST API for a bookstore in /tmp/bookstore/" \
-  --thinking medium --json --timeout 600
-```
-
-### 3. Monitor progress
-
-**Tail the gateway log live:**
-
-```bash
-openclaw logs --follow
-```
-
-Or read the log file directly:
-
-```bash
-tail -f ~/Code/local-agent/logs/openclaw-gateway.log
-```
-
-**Check gateway health:**
-
-```bash
-openclaw health
-```
-
-### 4. Manage sessions
-
-**List all sessions:**
-
-```bash
-openclaw sessions
-```
-
-**Resume a previous session** (continue where you left off):
-
-```bash
-openclaw agent --session-id "my-job" --message "Now add unit tests"
-```
-
-Sessions persist across restarts. You can pick up any previous conversation.
-
-### 5. Approve commands
-
-The agent runs in **full exec** mode — it can run any shell command without approval prompts. This lets it install dependencies, run tests, and build projects autonomously.
-
-**Safety limits still apply:** no sudo, no elevated permissions, no browser automation. The agent runs as your normal user.
-
-To switch to a more restrictive allowlist mode, edit `config/openclaw.json`:
-
-```json
-"exec": { "security": "allowlist", "safeBins": ["python3", "node", "git", "ls", "cat", "mkdir"] }
-```
-
-### 6. Review the output
-
-The agent writes files directly to wherever you told it. Check the results:
-
-```bash
-ls /tmp/todo-app/
-python3 /tmp/todo-app/app.py
-```
-
-### Example: Build and test a web app
-
-```bash
-# Give the job
-scripts/run-openclaw.sh "Create a Python Flask todo app in /tmp/my-todo/. Include add, complete, and delete. Use SQLite. Then tell me the exact command to run it."
-
-# Agent works... writes files, reports back with run instructions
-
-# Check the output
-ls /tmp/my-todo/
-python3 /tmp/my-todo/app.py
-
-# Open browser to http://localhost:5000
-```
-
-### Example: Debug an existing project
-
-```bash
-scripts/run-openclaw.sh "Read /home/user/project/app.py. It crashes on startup with 'KeyError: db_url'. Find the bug and fix it."
-```
-
-### Example: Scheduled tasks (cron)
-
-```bash
-openclaw cron add --schedule "0 */6 * * *" \
-  --message "Run the test suite at /home/user/project/ and report failures"
-```
-
----
-
-## Workflow 4: Proxy Chain (Advanced)
+## Workflow 3: Proxy Chain (Advanced)
 
 The proxy translates Anthropic's Messages API into OpenAI format. Any tool that speaks Anthropic API can use your local model.
 
@@ -346,49 +221,17 @@ export ANTHROPIC_API_KEY="local-qwen3-coder-next"
 
 ## Security Model
 
-Tritium Coder is configured for **local coding work only**. The OpenClaw config enforces these boundaries:
+Tritium Coder is configured for **local coding work only**. All services run on localhost, all inference happens on your GPU, no data leaves your machine.
 
 | Control | Setting | What It Means |
 |---------|---------|---------------|
-| **Gateway binding** | `loopback` | Localhost only by default. Add Tailscale Serve for HTTPS remote access on your private Tailnet. Token auth required. |
-| **Shell execution** | `full` | Agent can run any command. No sudo or elevated permissions. |
-| **Filesystem** | `local` | Full local filesystem access. The agent can read/write files anywhere you tell it to. |
-| **Browser automation** | `disabled` | No Playwright/Chrome automation. The agent cannot browse the web autonomously. |
-| **Web search/fetch** | `enabled` | Can search the web and fetch documentation for research. Read-only. |
-| **Elevated permissions** | `disabled` | No sudo, no root. The agent runs with normal user permissions. |
-| **Cross-context sends** | `disabled` | Cannot send messages to external services (Telegram, Discord, Slack, etc). |
-| **Agent-to-agent** | `disabled` | Cannot spawn or communicate with other agents. |
+| **Network** | `localhost only` | All services bind to localhost. No ports exposed to LAN or internet. |
+| **Shell execution** | `full` | Claude Code runs with `--dangerously-skip-permissions` for autonomous operation. |
+| **Filesystem** | `local` | Full local filesystem access. The agent can read/write files anywhere. |
+| **Elevated permissions** | `none` | Runs as your normal user. No sudo, no root. |
+| **Cloud APIs** | `none` | Zero external API calls at runtime. Everything runs on your hardware. |
 
-### Reviewing the config
-
-The security config lives at `config/openclaw.json` and is applied to `~/.openclaw/openclaw.json` during install and when running `scripts/run-openclaw.sh`.
-
-To audit your current setup:
-
-```bash
-openclaw security audit
-openclaw security audit --deep    # includes live gateway checks
-```
-
-### Customizing security
-
-Edit `config/openclaw.json` to adjust. For example, to completely disable web access:
-
-```json
-"web": {
-  "search": { "enabled": false },
-  "fetch": { "enabled": false }
-}
-```
-
-To restrict which commands the agent can run (default is `full`):
-
-```json
-"exec": {
-  "security": "allowlist",
-  "safeBins": ["python3", "node", "git", "ls", "cat"]
-}
-```
+For the full security model, see [docs/security.md](security.md).
 
 ---
 
@@ -444,7 +287,7 @@ watch -n 2 free -h                   # Memory usage
 
 ---
 
-## Workflow 5: Perpetual Iteration Engine (Build System)
+## Workflow 4: Perpetual Iteration Engine (Build System)
 
 The build system is an autonomous loop that generates any project from a text description, then iteratively improves it. The vision: **perpetual motion** — AI builds, automated tests validate from a user's perspective, failures drive the next iteration, and the system self-improves.
 

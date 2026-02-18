@@ -6,6 +6,8 @@ Give it a text description. Walk away. Come back to a working, tested, documente
 
 *By Matthew Valancy | Valpatel Software | (c) 2026*
 
+> **Why not ~~OpenClaw~~?** We started with OpenClaw as our agent framework. After 1 hour of development time (8 hours real-time on local hardware), it became clear: we need full independence. No OpenAI-affiliated dependencies. No external agent frameworks. Tritium Coder handles its own orchestration, session management, health checks, and security — natively, offline, with zero phone-home. The whole point is sovereignty over your AI stack.
+
 ---
 
 ## The Vision: Perpetual Motion
@@ -63,22 +65,24 @@ flowchart TB
         CLI["./iterate 'Build a Tetris game'"]
     end
 
-    subgraph engine["Perpetual Iteration Engine<br/>(build-project.sh)"]
-        Health["Health Check<br/>playwright verifies the app<br/>actually works"]
-        Select["Phase Selection<br/>picks fix / improve / refactor<br/>based on health + maturity"]
-        OC["OpenClaw<br/>orchestrates sessions,<br/>manages tool access"]
-        Vision["Vision Gate<br/>screenshots at 5 resolutions"]
+    subgraph engine["Iteration Engine<br/>(build-project.sh)"]
+        Generate["Generate<br/>initial code from<br/>description"]
+        Health["Health Check<br/>Playwright loads app<br/>in headless browser"]
+        Select["Phase Selection<br/>FAIL → fix, PASS → improve,<br/>big files → refactor"]
+        Prompt["Focused Prompt<br/>one task, do it well,<br/>verify it worked"]
+        Vision["Vision Gate<br/>screenshots at 5 resolutions<br/>reviewed by vision model"]
 
+        Generate --> Health
         Health --> Select
-        Select --> OC
-        OC --> Health
-        OC -.->|"after polish"| Vision
-        Vision -.->|"feedback"| OC
+        Select --> Prompt
+        Prompt --> Health
+        Prompt -.->|"after polish"| Vision
+        Vision -.->|"feedback"| Prompt
     end
 
-    subgraph agents["Coding Agent"]
-        CC["Claude Code<br/>reads, writes, runs code"]
-        Proxy["claude-code-proxy :8082"]
+    subgraph agent["Coding Agent"]
+        CC["Claude Code<br/>reads, writes, runs,<br/>tests code"]
+        Proxy["claude-code-proxy<br/>:8082"]
         CC --> Proxy
     end
 
@@ -87,21 +91,21 @@ flowchart TB
         VisionM["qwen3-vl:32b<br/>vision model"]
     end
 
-    CLI --> Health
-    OC -->|"launches"| CC
+    CLI --> Generate
+    Prompt -->|"claude -p"| CC
     Proxy -->|"inference"| Coder
     Vision -->|"screenshot review"| VisionM
-    OC -.->|"direct API"| Coder
 
     style user fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style engine fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
-    style agents fill:#1b2838,stroke:#c4b5fd,color:#e0e0e0,stroke-width:2px
+    style agent fill:#1b2838,stroke:#c4b5fd,color:#e0e0e0,stroke-width:2px
     style gpu fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 
     style CLI fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Generate fill:#4c1d95,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
     style Health fill:#064e3b,stroke:#34d399,color:#e0e0e0,stroke-width:2px
     style Select fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
-    style OC fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
+    style Prompt fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
     style Vision fill:#0f3460,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style CC fill:#4c1d95,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
     style Proxy fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
@@ -113,11 +117,12 @@ flowchart TB
 
 | Layer | Default | Purpose |
 |-------|---------|---------|
+| **Coding Agent** | [Claude Code](https://github.com/anthropics/claude-code) | Reads, writes, runs, tests code |
 | **Language Model** | [Qwen3-Coder-Next](https://ollama.com/library/qwen3-coder-next) 80B MoE | Code generation, reasoning |
 | **Model Server** | [Ollama](https://ollama.com) | Runs the model on your GPU |
-| **Agent Framework** | [OpenClaw](https://github.com/openclaw/openclaw) | Tool use: file I/O, shell exec |
-| **API Bridge** | [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) | Lets Claude Code talk to Ollama |
-| **Coding Agent** | [Claude Code](https://github.com/anthropics/claude-code) | Interactive terminal coding |
+| **API Bridge** | [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) | Translates Anthropic API → OpenAI API for Ollama |
+| **Orchestrator** | build-project.sh | Iteration loop, health checks, phase selection |
+| **Health Check** | [Playwright](https://playwright.dev) | Headless browser verification |
 
 ---
 
@@ -145,7 +150,6 @@ cd tritium-coder
 ### Interactive coding session
 
 ```bash
-scripts/run-openclaw.sh         # Terminal agent (autonomous)
 scripts/run-claude.sh           # Claude Code (interactive)
 ```
 
@@ -226,7 +230,7 @@ flowchart TD
 
 | Doc | What's in it |
 |-----|-------------|
-| **[docs/usage.md](docs/usage.md)** | All workflows — Claude Code, OpenClaw agent, Ollama API, iteration engine |
+| **[docs/usage.md](docs/usage.md)** | All workflows — Claude Code, Ollama API, iteration engine |
 | **[docs/architecture.md](docs/architecture.md)** | System architecture, request flow, component diagrams |
 | **[docs/security.md](docs/security.md)** | Security model — what the agent can and cannot do |
 | **[docs/mesh.md](docs/mesh.md)** | Multi-node setup (experimental) |
@@ -247,12 +251,9 @@ tritium-coder/
     create-examples.sh      # Batch project builder
     start.sh, stop.sh       # Stack lifecycle
     run-claude.sh           # Claude Code launcher
-    run-openclaw.sh         # OpenClaw agent launcher
     lib/common.sh           # Shared bash library
   lib/
     test-harness.js         # Browser test framework (TritiumTest)
-  config/
-    openclaw.json           # Agent security config
   web/
     index.html              # Control panel UI
   docs/                     # Detailed documentation
@@ -263,10 +264,10 @@ tritium-coder/
 
 ## Credits
 
+- [Claude Code](https://github.com/anthropics/claude-code) by Anthropic
 - [Qwen3-Coder-Next](https://ollama.com/library/qwen3-coder-next) by Alibaba/Qwen
 - [Ollama](https://ollama.com)
-- [Claude Code](https://github.com/anthropics/claude-code) by Anthropic
-- [OpenClaw](https://github.com/openclaw/openclaw)
+- [Playwright](https://playwright.dev) by Microsoft
 - [claude-code-proxy](https://github.com/fuergaosi233/claude-code-proxy) by fuergaosi233
 
 ## License

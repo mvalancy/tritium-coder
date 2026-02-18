@@ -105,7 +105,8 @@ if [ -z "$OUTPUT_DIR" ]; then
     OUTPUT_DIR="${PROJECT_DIR}/examples/${PROJECT_NAME}"
 fi
 
-DURATION_SECS=$((HOURS * 3600))
+# Support fractional hours (e.g. 0.15) — bash can't do float arithmetic
+DURATION_SECS=$(awk "BEGIN {printf \"%d\", $HOURS * 3600}")
 START_TIME=$(date +%s)
 CODER_MODEL="$OLLAMA_MODEL_NAME"
 OLLAMA_URL="$(get_ollama_url)"
@@ -674,7 +675,7 @@ agent_code() {
         -d "$OUTPUT_DIR" \
         --output-format text \
         $continue_flag \
-        2>/dev/null || echo ""
+        2>>"${LOG_FILE:-/dev/null}" || echo ""
 }
 
 unload_model() {
@@ -1639,7 +1640,7 @@ while [ "$(time_remaining)" -gt 300 ]; do
     if [ -n "$response" ]; then
         log_to "CODE   response_len=${#response}"
         # Extract summary and confidence score
-        local summary
+        summary=""
         summary=$(echo "$response" | python3 -c "
 import sys,json
 try:
@@ -1655,7 +1656,7 @@ except:
         record_cycle "$phase" "$summary"
 
         # Try to extract confidence score from response
-        local score
+        score=""
         score=$(echo "$response" | python3 -c "
 import sys,re
 text = sys.stdin.read()
@@ -1735,10 +1736,9 @@ echo "  Health details: ${HEALTH_DETAILS}"
 echo ""
 echo "  Files:"
 find "$OUTPUT_DIR" -type f -not -path '*/screenshots/*' | sort | while read -r f; do
-    local size lines
     size=$(wc -c < "$f")
     lines=$(wc -l < "$f" 2>/dev/null || echo "?")
-    local rel="${f#${OUTPUT_DIR}/}"
+    rel="${f#${OUTPUT_DIR}/}"
     echo "    ${rel}  (${size} bytes, ${lines} lines)"
 done
 echo ""

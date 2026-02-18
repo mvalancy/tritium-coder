@@ -7,7 +7,7 @@ set -euo pipefail
 #
 #  Designed for NVIDIA GB10 with 128GB unified memory.
 #  Installs everything needed to run a local AI coding agent
-#  with Claude Code and OpenClaw. No internet required after install.
+#  with Claude Code. No internet required after install.
 #
 #  Default model: Qwen3-Coder-Next (80B MoE, ~50GB, full tool calling)
 # =============================================================================
@@ -24,7 +24,7 @@ for arg in "$@"; do
             banner
             echo -e "  ${BOLD}./install.sh${RST} — Install the full Tritium Coder stack"
             echo ""
-            echo -e "  Downloads and configures Ollama, the Claude Code proxy, and OpenClaw."
+            echo -e "  Downloads and configures Ollama and the Claude Code proxy."
             echo -e "  Pulls the default model (~50 GB). Safe to re-run — already-installed"
             echo -e "  components are skipped."
             echo ""
@@ -178,7 +178,6 @@ MISSING_APT=()
 NEED_OLLAMA=false
 NEED_NODE=false
 HAS_PYTHON=false
-CAN_INSTALL_OPENCLAW=true
 
 # --- Python 3 (hard requirement, can't auto-install reliably) ---
 if require_cmd python3; then
@@ -230,30 +229,12 @@ else
     NEED_SUDO=true
 fi
 
-# --- Node.js (>= 22 for OpenClaw) ---
+# --- Node.js (optional, for Claude Code CLI) ---
 NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1 || echo "0")
-if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
+if [ "$NODE_VERSION" -gt 0 ] 2>/dev/null; then
     log_ok "Node.js ${DIM}v$(node --version 2>/dev/null)${RST}"
 else
-    if [ "$NODE_VERSION" -gt 0 ] 2>/dev/null; then
-        log_warn "Node.js ${YLW}v${NODE_VERSION} (need v22+ for OpenClaw)${RST}"
-    else
-        log_warn "Node.js ${YLW}not installed (need v22+ for OpenClaw)${RST}"
-    fi
-    NEED_NODE=true
-    NEED_SUDO=true
-fi
-
-# --- pnpm ---
-if require_cmd pnpm; then
-    log_ok "pnpm"
-else
-    if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
-        log_warn "pnpm ${YLW}not installed${RST}"
-        NEED_SUDO=true
-    else
-        log_skip "pnpm (needs Node.js 22+)"
-    fi
+    log_info "Node.js ${DIM}not installed (needed for Claude Code CLI)${RST}"
 fi
 
 # --- Claude Code CLI ---
@@ -283,10 +264,6 @@ if [ "$NEED_SUDO" = true ]; then
     log_info "The following will be installed:"
     [ "$NEED_OLLAMA" = true ] && log_info "  ${BOLD}Ollama${RST}          ${DIM}Model server (curl installer, uses sudo)${RST}"
     [ ${#MISSING_APT[@]} -gt 0 ] && log_info "  ${BOLD}${MISSING_APT[*]}${RST}  ${DIM}(apt-get)${RST}"
-    [ "$NEED_NODE" = true ] && log_info "  ${BOLD}Node.js 22${RST}      ${DIM}Runtime for OpenClaw (NodeSource repo + apt)${RST}"
-    if [ "$NEED_NODE" = false ] && ! require_cmd pnpm; then
-        log_info "  ${BOLD}pnpm${RST}            ${DIM}Package manager for OpenClaw (npm -g)${RST}"
-    fi
     echo ""
 
     # Check if sudo is available at all
@@ -311,7 +288,7 @@ fi
 # =========================================================================
 #  PHASE 1: Install missing system dependencies
 # =========================================================================
-section "Phase 1/4 : System Dependencies"
+section "Phase 1/3 : System Dependencies"
 
 # --- apt packages ---
 if [ ${#MISSING_APT[@]} -gt 0 ]; then
@@ -348,15 +325,6 @@ else
     log_ok "Node.js"
 fi
 
-# --- pnpm ---
-if ! require_cmd pnpm && [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
-    log_run "Installing pnpm..."
-    sudo npm install -g pnpm >> "$LOG_DIR/openclaw-install.log" 2>&1
-    log_ok "pnpm installed"
-else
-    require_cmd pnpm && log_ok "pnpm"
-fi
-
 log_ok "All dependencies ready"
 
 # =========================================================================
@@ -364,7 +332,7 @@ log_ok "All dependencies ready"
 # =========================================================================
 
 if [ "$REMOTE_MODE" = true ]; then
-    section "Phase 2/4 : Remote Ollama Setup"
+    section "Phase 2/3 : Remote Ollama Setup"
 
     OLLAMA_URL=$(get_ollama_url)
     if [ "$OLLAMA_URL" = "http://localhost:11434" ] && [ -z "${OLLAMA_HOST:-}" ]; then
@@ -384,7 +352,7 @@ if [ "$REMOTE_MODE" = true ]; then
 
     log_ok "Skipping local model download (remote mode)"
 else
-    section "Phase 2/4 : Download Model (${OLLAMA_MODEL_NAME})"
+    section "Phase 2/3 : Download Model (${OLLAMA_MODEL_NAME})"
 
     # Ensure Ollama is running
     if ! curl_check http://localhost:11434/api/tags &>/dev/null; then
@@ -428,7 +396,7 @@ fi
 # =========================================================================
 #  PHASE 3: Claude Code Proxy
 # =========================================================================
-section "Phase 3/4 : Claude Code Proxy"
+section "Phase 3/3 : Claude Code Proxy"
 
 if [ -d "$PROXY_DIR" ] && [ -f "$PROXY_DIR/start_proxy.py" ]; then
     log_ok "Proxy already cloned"
@@ -467,91 +435,6 @@ HOST=0.0.0.0
 PORT=${PROXY_PORT}
 ENVEOF
 log_ok "Proxy configured ${DIM}(port ${PROXY_PORT}, Ollama at ${OLLAMA_URL})${RST}"
-
-# =========================================================================
-#  PHASE 4: OpenClaw
-# =========================================================================
-section "Phase 4/4 : OpenClaw"
-
-OPENCLAW_DIR="$PROJECT_DIR/.openclaw"
-
-if [ "$NODE_VERSION" -ge 22 ] 2>/dev/null; then
-    # --- Clone OpenClaw repo ---
-    if [ -d "$OPENCLAW_DIR/.git" ]; then
-        log_ok "OpenClaw repo already cloned"
-    else
-        log_run "Cloning OpenClaw repo..."
-        rm -rf "$OPENCLAW_DIR"
-        git clone https://github.com/openclaw/openclaw.git "$OPENCLAW_DIR" \
-            >> "$LOG_DIR/openclaw-install.log" 2>&1
-        log_ok "OpenClaw cloned to ${DIM}.openclaw/${RST}"
-    fi
-
-    # --- Install dependencies ---
-    if [ ! -d "$OPENCLAW_DIR/node_modules" ]; then
-        log_run "Installing OpenClaw dependencies (pnpm install)..."
-        (cd "$OPENCLAW_DIR" && pnpm install) >> "$LOG_DIR/openclaw-install.log" 2>&1
-        log_ok "Dependencies installed"
-    else
-        log_ok "Dependencies already installed"
-    fi
-
-    # --- Build from source ---
-    if [ ! -d "$OPENCLAW_DIR/dist" ]; then
-        timer_start
-        log_run "Building OpenClaw from source..."
-        (cd "$OPENCLAW_DIR" && pnpm build) >> "$LOG_DIR/openclaw-install.log" 2>&1
-        if [ -d "$OPENCLAW_DIR/dist" ]; then
-            log_ok "OpenClaw built successfully ($(timer_elapsed)s)"
-        else
-            log_fail "OpenClaw build failed. See $LOG_DIR/openclaw-install.log"
-        fi
-    else
-        log_ok "OpenClaw already built"
-    fi
-
-    # --- Link globally ---
-    if ! require_cmd openclaw; then
-        log_run "Linking OpenClaw globally..."
-        (cd "$OPENCLAW_DIR" && sudo npm link) >> "$LOG_DIR/openclaw-install.log" 2>&1
-    fi
-
-    if require_cmd openclaw; then
-        OC_VER=$(openclaw --version 2>/dev/null || echo "unknown")
-        log_ok "OpenClaw ${DIM}${OC_VER}${RST} (from local source)"
-    else
-        log_warn "OpenClaw build succeeded but global link failed."
-        log_info "You can run it directly: node .openclaw/scripts/run-node.mjs"
-    fi
-
-    # Apply hardened OpenClaw config
-    if [ -f "$CONFIG_DIR/openclaw.json" ]; then
-        mkdir -p "$HOME/.openclaw"
-        GW_BIND=$(get_gateway_bind)
-        sed -e "s/qwen3-coder-next/${OLLAMA_MODEL_NAME}/g" \
-            -e "s/\"bind\": \"loopback\"/\"bind\": \"${GW_BIND}\"/" \
-            "$CONFIG_DIR/openclaw.json" > "$HOME/.openclaw/openclaw.json"
-        log_ok "Hardened config applied to ${DIM}~/.openclaw/openclaw.json${RST} ${DIM}(model: ${OLLAMA_MODEL_NAME})${RST}"
-    else
-        log_warn "config/openclaw.json not found — skipping config"
-    fi
-
-    # Build the Control UI (web dashboard)
-    if [ ! -f "$OPENCLAW_DIR/dist/control-ui/index.html" ]; then
-        log_run "Building OpenClaw Control UI..."
-        (cd "$OPENCLAW_DIR" && pnpm ui:build) >> "$LOG_DIR/openclaw-install.log" 2>&1
-        if [ -f "$OPENCLAW_DIR/dist/control-ui/index.html" ]; then
-            log_ok "Control UI built (access via: openclaw dashboard)"
-        else
-            log_warn "Control UI build failed (dashboard will not be available)"
-        fi
-    else
-        log_ok "Control UI already built"
-    fi
-else
-    log_warn "Node.js < 22 — skipping OpenClaw"
-    log_info "Install Node 22+, then re-run this script."
-fi
 
 # =========================================================================
 #  Playwright (headless browser for vision gate screenshots)
@@ -593,11 +476,10 @@ echo -e "  ${BOLD}Model:${RST}     ${OLLAMA_MODEL_NAME}"
 echo -e "  ${BOLD}Features:${RST}  Tool calling, code generation, debugging"
 echo ""
 echo -e "  ${BOLD}Quick Start:${RST}"
-echo -e "    ${CYN}./start${RST}               Start the full stack (Ollama + proxy + gateway)"
+echo -e "    ${CYN}./start${RST}               Start the full stack (Ollama + proxy)"
 echo -e "    ${CYN}./dashboard${RST}           Open control panel"
-echo -e "    ${CYN}openclaw dashboard${RST}    Open chat dashboard"
-echo -e "    ${CYN}scripts/run-openclaw.sh${RST}  Launch terminal agent"
-echo -e "    ${CYN}scripts/run-claude.sh${RST}    Launch Claude Code (local)"
+echo -e "    ${CYN}scripts/run-claude.sh${RST}  Launch Claude Code (local)"
+echo -e "    ${CYN}./iterate \"...\"${RST}        Build a project from a description"
 echo -e "    ${CYN}./stop${RST}                Stop everything"
 echo -e "    ${CYN}./status${RST}              Check stack status"
 echo ""
