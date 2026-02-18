@@ -63,43 +63,53 @@ flowchart TB
         CLI["./iterate 'Build a Tetris game'"]
     end
 
-    subgraph engine["Perpetual Iteration Engine"]
-        Health["Health Check<br/>(playwright)"]
-        Select["Phase Selection<br/>(dynamic)"]
-        Agent["AI Agent<br/>(openclaw)"]
-        Vision["Vision Gate<br/>(multi-resolution QA)"]
+    subgraph engine["Perpetual Iteration Engine<br/>(build-project.sh)"]
+        Health["Health Check<br/>playwright loads the app,<br/>checks for crashes"]
+        Select["Phase Selection<br/>picks fix / improve / refactor<br/>based on health + maturity"]
+        OC["openclaw agent<br/>sends focused prompts<br/>per phase"]
+        Vision["Vision Gate<br/>screenshots at 5 resolutions"]
 
         Health --> Select
-        Select --> Agent
-        Agent --> Health
-        Agent -.->|"after polish"| Vision
-        Vision -.->|"feedback"| Agent
+        Select --> OC
+        OC --> Health
+        OC -.->|"after polish"| Vision
+        Vision -.->|"feedback"| OC
     end
 
-    subgraph infra["Local Infrastructure"]
-        Ollama["Ollama :11434<br/>Qwen3-Coder-Next 80B"]
-        Gateway["OpenClaw Gateway :18789"]
-        Proxy["claude-code-proxy :8082"]
+    subgraph gateway["OpenClaw Gateway :18789"]
+        Tools["Tool Access<br/>file read/write, shell exec"]
     end
 
-    CLI --> engine
-    Agent --> Gateway
-    Gateway --> Ollama
-    Vision --> Ollama
-    Proxy --> Ollama
+    subgraph gpu["Local GPU (Ollama :11434)"]
+        Coder["Qwen3-Coder-Next 80B<br/>coding model"]
+        VisionM["qwen3-vl:32b<br/>vision model"]
+    end
+
+    CLI --> Health
+    OC -->|"prompt + tool calls"| Tools
+    Tools -->|"inference"| Coder
+    Vision -->|"screenshot + prompt"| VisionM
 
     style user fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style engine fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
-    style infra fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style gateway fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style gpu fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 
     style CLI fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style Health fill:#064e3b,stroke:#34d399,color:#e0e0e0,stroke-width:2px
     style Select fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
-    style Agent fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
+    style OC fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
     style Vision fill:#0f3460,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
-    style Ollama fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
-    style Gateway fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
-    style Proxy fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Tools fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Coder fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style VisionM fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+```
+
+**Interactive use** (separate from the iteration engine):
+
+```bash
+scripts/run-claude.sh       # Claude Code → claude-code-proxy → Ollama
+scripts/run-openclaw.sh     # OpenClaw agent → Gateway → Ollama
 ```
 
 **The stack** (every piece is swappable):
