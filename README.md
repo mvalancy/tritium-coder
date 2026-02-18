@@ -6,7 +6,7 @@ Give it a text description. Walk away. Come back to a working, tested, documente
 
 *By Matthew Valancy | Valpatel Software | (c) 2026*
 
-> **Why not ~~OpenClaw~~?** We started with OpenClaw as our agent framework. After 1 hour of development time (8 hours real-time on local hardware), it became clear: we need full independence. No OpenAI-affiliated dependencies. No external agent frameworks. Tritium Coder handles its own orchestration, session management, health checks, and security — natively, offline, with zero phone-home. The whole point is sovereignty over your AI stack.
+> **Why not ~~OpenClaw~~?** We started with OpenClaw as our agent framework. After 1 hour of development time (8 hours real-time on local hardware), it became clear: we need full independence. No OpenAI-affiliated dependencies. No external agent frameworks. Tritium Coder handles its own orchestration, session management, health checks, and security — natively, offline, with zero phone-home. The whole point is sovereignty over your AI stack and with partners you can trust, like Anthropic.
 
 ---
 
