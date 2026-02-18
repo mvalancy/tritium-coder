@@ -3,7 +3,7 @@ set -euo pipefail
 
 # =============================================================================
 #  Tritium Coder  |  Test Suite Runner
-#  Sends real coding jobs to the OpenClaw agent and validates the output.
+#  Sends real coding jobs to Claude Code and validates the output.
 #  Usage: ./tests/run-all.sh [test-name]
 #    No args = run all tests sequentially
 #    test-name = run a single test (e.g., "tetris", "pong", "smashtv", "todo", "api")
@@ -18,7 +18,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     banner
     echo -e "  ${BOLD}./test${RST} — Run the coding test suite"
     echo ""
-    echo -e "  Sends real coding jobs to the OpenClaw agent and validates the output."
+    echo -e "  Sends real coding jobs to Claude Code and validates the output."
     echo -e "  Each test asks the agent to build a project, then checks the generated"
     echo -e "  files for correctness (file existence, size, key patterns, syntax)."
     echo ""
@@ -65,9 +65,14 @@ preflight() {
         echo -e "  ${BRED}Ollama is not running.${RST} Run ${CYN}./start${RST} first."
         exit 1
     fi
-    # Check gateway
-    if ! ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} "; then
-        echo -e "  ${BRED}OpenClaw gateway is not running.${RST} Run ${CYN}./start${RST} first."
+    # Check proxy
+    if ! ss -tlnp 2>/dev/null | grep -q ":${PROXY_PORT} "; then
+        echo -e "  ${BRED}Claude Code proxy is not running.${RST} Run ${CYN}./start${RST} first."
+        exit 1
+    fi
+    # Check Claude Code CLI
+    if ! command -v claude &>/dev/null; then
+        echo -e "  ${BRED}Claude Code CLI not found.${RST} Install: ${CYN}npm i -g @anthropic-ai/claude-code${RST}"
         exit 1
     fi
     log_ok "Preflight checks passed"
@@ -80,15 +85,13 @@ run_agent_job() {
 
     mkdir -p "$output_dir"
 
-    export OPENCLAW_GATEWAY_TOKEN="tritium-local-dev"
-    export OLLAMA_API_KEY="ollama-local"
-
-    openclaw agent \
-        --local \
-        --session-id "$session_id" \
-        --message "$prompt" \
-        --thinking medium \
-        --timeout "$AGENT_TIMEOUT" \
+    ANTHROPIC_BASE_URL="http://localhost:${PROXY_PORT:-8082}" \
+    ANTHROPIC_API_KEY="local-model" \
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    timeout "$AGENT_TIMEOUT" claude -p "$prompt" \
+        --dangerously-skip-permissions \
+        -d "$output_dir" \
+        --output-format text \
         > "$output_dir/agent-output.log" 2>&1 || true
 }
 

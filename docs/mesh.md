@@ -2,17 +2,23 @@
 
 *(c) 2026 Matthew Valancy | Valpatel Software*
 
-Scale Tritium Coder across multiple machines using Tailscale. Each machine runs Ollama with specialized models; the primary node coordinates everything through the OpenClaw gateway.
+Scale Tritium Coder across multiple machines using Tailscale. Each machine runs Ollama with specialized models; the primary node runs the iteration engine and coordinates everything.
 
 ## Overview
 
 ```mermaid
 flowchart TB
-    User["You"] --> GW["Primary Node\nOpenClaw Gateway\nQwen3-Coder-Next"]
+    User["You"] --> Primary["Primary Node<br/>Iteration Engine<br/>Qwen3-Coder-Next"]
 
-    GW -->|Tailscale| NA["Node A\nVision Model\n(screenshot analysis, UI review)"]
-    GW -->|Tailscale| NB["Node B\nFast Coder\n(quick edits, completions)"]
-    GW -->|Tailscale| NC["Node C\nEmbeddings\n(code search, RAG)"]
+    Primary -->|Tailscale| NA["Node A<br/>Vision Model<br/>(screenshot analysis, UI review)"]
+    Primary -->|Tailscale| NB["Node B<br/>Fast Coder<br/>(quick edits, completions)"]
+    Primary -->|Tailscale| NC["Node C<br/>Embeddings<br/>(code search, RAG)"]
+
+    style User fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Primary fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
+    style NA fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style NB fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style NC fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 ```
 
 ## Hardware Examples
@@ -34,7 +40,7 @@ Follow the standard install:
 git clone https://github.com/mvalancy/tritium-coder.git
 cd tritium-coder
 ./install.sh
-scripts/start.sh
+./start
 ```
 
 ### 2. Set up a mesh node
@@ -56,64 +62,13 @@ curl http://localhost:11434/api/tags
 
 That's it for the mesh node. No other software needed.
 
-### 3. Register the mesh node on the primary
+### 3. Point the iteration engine at mesh nodes
 
-Edit `config/openclaw.json` on the primary node. Add a provider for each mesh node:
-
-```json
-{
-  "models": {
-    "providers": {
-      "ollama": {
-        "baseUrl": "http://127.0.0.1:11434",
-        "api": "ollama",
-        "models": [
-          {
-            "id": "qwen3-coder-next",
-            "name": "Qwen3 Coder Next",
-            "reasoning": true,
-            "input": ["text"],
-            "contextWindow": 65536,
-            "maxTokens": 32768
-          }
-        ]
-      },
-      "fast-coder": {
-        "baseUrl": "http://<tailscale-ip-of-node-a>:11434",
-        "api": "ollama",
-        "models": [
-          {
-            "id": "qwen2.5-coder:7b",
-            "name": "Fast Coder",
-            "input": ["text"],
-            "contextWindow": 32768,
-            "maxTokens": 8192
-          }
-        ]
-      },
-      "vision": {
-        "baseUrl": "http://<tailscale-ip-of-node-b>:11434",
-        "api": "ollama",
-        "models": [
-          {
-            "id": "llava-next",
-            "name": "Vision",
-            "input": ["text", "image"],
-            "contextWindow": 32768,
-            "maxTokens": 4096
-          }
-        ]
-      }
-    }
-  }
-}
-```
-
-Then apply and restart:
+Set environment variables to route vision or fast-coder calls to mesh nodes:
 
 ```bash
-cp config/openclaw.json ~/.openclaw/openclaw.json
-scripts/stop.sh && scripts/start.sh
+# In your shell or .tritium.env:
+VISION_OLLAMA_URL=http://<tailscale-ip-of-node-a>:11434
 ```
 
 ### 4. Verify connectivity
@@ -121,11 +76,7 @@ scripts/stop.sh && scripts/start.sh
 From the primary node, verify each mesh node is reachable:
 
 ```bash
-# Check each node
 curl http://<tailscale-ip>:11434/api/tags
-
-# List available models across all providers
-openclaw models list
 ```
 
 ## Network Topology
@@ -133,17 +84,21 @@ openclaw models list
 ```mermaid
 flowchart LR
     subgraph Tailnet["Your Tailscale Network (private)"]
-        P["Primary\n100.x.x.1\n:11434 :18789"]
-        A["Node A\n100.x.x.2\n:11434"]
-        B["Node B\n100.x.x.3\n:11434"]
-        C["Node C\n100.x.x.4\n:11434"]
+        P["Primary<br/>100.x.x.1<br/>:11434 :8082"]
+        A["Node A<br/>100.x.x.2<br/>:11434"]
+        B["Node B<br/>100.x.x.3<br/>:11434"]
 
         P <-->|"encrypted"| A
         P <-->|"encrypted"| B
-        P <-->|"encrypted"| C
     end
 
     Internet["Public Internet"] -.->|"blocked"| Tailnet
+
+    style Tailnet fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
+    style P fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
+    style A fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style B fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Internet fill:#3a1a1a,stroke:#f87171,color:#e0e0e0,stroke-width:2px
 ```
 
 All traffic between nodes goes over Tailscale's encrypted WireGuard tunnels. No ports are exposed to the public internet.

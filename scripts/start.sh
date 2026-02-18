@@ -14,16 +14,14 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     banner
     echo -e "  ${BOLD}./start${RST} — Start the full AI stack"
     echo ""
-    echo -e "  Launches Ollama, loads the model, starts the Claude Code proxy,"
-    echo -e "  and starts the OpenClaw gateway. Safe to run multiple times —"
-    echo -e "  already-running services are skipped."
+    echo -e "  Launches Ollama, loads the model, and starts the Claude Code proxy."
+    echo -e "  Safe to run multiple times — already-running services are skipped."
     echo ""
     echo -e "  ${BOLD}Usage:${RST}  ./start"
     echo ""
     echo -e "  ${BOLD}Services started:${RST}"
     echo -e "    Ollama          :11434   Model server"
     echo -e "    Proxy           :${PROXY_PORT}    Anthropic API bridge"
-    echo -e "    Gateway         :${GATEWAY_PORT}  OpenClaw agent manager"
     echo ""
     echo -e "  ${BOLD}See also:${RST}  ./stop, ./status, ./dashboard"
     echo ""
@@ -31,7 +29,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 banner
-echo -e "  ${DIM}Starting Ollama, proxy, and gateway. Loads ${OLLAMA_MODEL_NAME} into GPU memory.${RST}"
+echo -e "  ${DIM}Starting Ollama and proxy. Loads ${OLLAMA_MODEL_NAME} into GPU memory.${RST}"
 echo ""
 
 # --- Memory warning (skip if remote mode) ---
@@ -62,19 +60,14 @@ echo ""
 echo -e "  ${BOLD}Services:${RST}"
 echo -e "    Ollama API        ${BGRN}http://localhost:11434${RST}"
 echo -e "    Claude Code Proxy ${BGRN}http://localhost:${PROXY_PORT}${RST}"
-if port_listening "$GATEWAY_PORT"; then
-echo -e "    OpenClaw Gateway  ${BGRN}http://localhost:${GATEWAY_PORT}${RST}"
-echo -e "    Chat Dashboard    ${BGRN}http://localhost:${GATEWAY_PORT}/#token=tritium-local-dev${RST}"
-fi
 if port_listening "$PANEL_PORT"; then
 echo -e "    Control Panel     ${BGRN}http://localhost:${PANEL_PORT}${RST}"
 fi
 echo ""
 echo -e "  ${BOLD}Next:${RST}"
 echo -e "    ${CYN}scripts/run-claude.sh${RST}    Launch Claude Code (terminal)"
-echo -e "    ${CYN}scripts/run-openclaw.sh${RST}  Launch OpenClaw agent (terminal)"
+echo -e "    ${CYN}./iterate \"...\"${RST}          Build a project from a description"
 echo -e "    ${CYN}./dashboard${RST}              Open control panel"
-echo -e "    ${CYN}openclaw dashboard${RST}       Open chat dashboard"
 echo -e "    ${CYN}./status${RST}                 Check status"
 echo -e "    ${CYN}./stop${RST}                   Stop everything"
 echo ""

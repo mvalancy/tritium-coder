@@ -71,7 +71,7 @@ banner() {
     echo ""
     echo -e "  ${BMAG}+$(printf '%0.s-' $(seq 1 $width))+"
     echo -e "  |${RST}  ${BOLD}${WHT}TRITIUM CODER${RST}  ${DIM}Local AI Coding Stack${RST}                        ${BMAG}|"
-    echo -e "  |${RST}  ${CYN}Ollama${RST} + ${CYN}Claude Code${RST} + ${CYN}OpenClaw${RST}                             ${BMAG}|"
+    echo -e "  |${RST}  ${CYN}Ollama${RST} + ${CYN}Claude Code${RST} + ${CYN}Playwright${RST}                            ${BMAG}|"
     echo -e "  |${RST}  ${DIM}(c) 2026 Matthew Valancy  |  Valpatel Software${RST}              ${BMAG}|"
     echo -e "  +$(printf '%0.s-' $(seq 1 $width))+"
     echo -e "  |${RST}  ${DIM}MIT License${RST}  ${CYN}github.com/mvalancy/tritium-coder${RST}              ${BMAG}|"
@@ -160,7 +160,6 @@ timer_elapsed() {
 
 OLLAMA_MODEL_NAME="qwen3-coder-next"
 PROXY_PORT=8082
-GATEWAY_PORT=18789
 PANEL_PORT=18790
 
 # --- Network helpers ---
@@ -178,15 +177,6 @@ get_bind_addr() {
         fi
     fi
     echo "127.0.0.1"
-}
-
-# Gateway bind mode: "all" if Tailscale is online, "loopback" otherwise.
-get_gateway_bind() {
-    if [ "$(get_bind_addr)" = "0.0.0.0" ]; then
-        echo "all"
-    else
-        echo "loopback"
-    fi
 }
 
 # --- HTTP helpers ---
@@ -380,45 +370,6 @@ ensure_proxy() {
     return 1
 }
 
-ensure_gateway() {
-    if port_listening "$GATEWAY_PORT"; then
-        log_ok "OpenClaw gateway :${GATEWAY_PORT}"
-        return 0
-    fi
-    if ! command -v openclaw &>/dev/null; then
-        log_warn "OpenClaw not installed (optional)"
-        return 1
-    fi
-    local gw_bind
-    gw_bind=$(get_gateway_bind)
-    # Apply hardened config if not present
-    local oc_config="$HOME/.openclaw/openclaw.json"
-    if [ ! -f "$oc_config" ]; then
-        mkdir -p "$HOME/.openclaw"
-        sed -e "s/qwen3-coder-next/${OLLAMA_MODEL_NAME}/g" \
-            -e "s/\"bind\": \"loopback\"/\"bind\": \"${gw_bind}\"/" \
-            "$CONFIG_DIR/openclaw.json" > "$oc_config"
-    fi
-    timer_start
-    log_run "Starting OpenClaw gateway (bind ${gw_bind})..."
-    ensure_dir "$LOG_DIR"
-    (
-        cd "$PROJECT_DIR"
-        nohup openclaw gateway run --bind "$gw_bind" > "$LOG_DIR/openclaw-gateway.log" 2>&1 &
-        echo $! > "$LOG_DIR/openclaw-gateway.pid"
-    )
-    for _ in $(seq 1 8); do
-        port_listening "$GATEWAY_PORT" && break
-        sleep 1
-    done
-    if port_listening "$GATEWAY_PORT"; then
-        log_ok "OpenClaw gateway started on port ${GATEWAY_PORT} ($(timer_elapsed)s)"
-        return 0
-    fi
-    log_warn "OpenClaw gateway may not have started after $(timer_elapsed)s. Check $LOG_DIR/openclaw-gateway.log"
-    return 1
-}
-
 ensure_panel() {
     if port_listening "$PANEL_PORT"; then
         log_ok "Control panel :${PANEL_PORT}"
@@ -459,7 +410,6 @@ ensure_stack() {
         ensure_model || true
     fi
     ensure_proxy   || ok=false
-    ensure_gateway || true
     ensure_panel   || true
     local stack_elapsed=$(( $(date +%s) - stack_start ))
     tlog "--- ensure_stack finished (${stack_elapsed}s total) ---"

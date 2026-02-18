@@ -312,7 +312,7 @@
   </div>
   <div class="header-actions">
     <span class="header-status" id="header-status"></span>
-    <a class="btn primary" id="btn-dashboard" href="#" target="_blank" data-tip="Open the OpenClaw chat UI">Open Chat Dashboard</a>
+    <a class="btn primary" href="https://github.com/mvalancy/tritium-coder" target="_blank" data-tip="View project on GitHub">GitHub</a>
     <button class="btn" onclick="refreshAll()" data-tip="Check all services now">Refresh</button>
   </div>
 </div>
@@ -329,10 +329,6 @@
       <div class="service-row" data-tip="Translates Anthropic API calls to OpenAI format">
         <div><span class="status-dot checking" id="dot-proxy"></span><span class="service-name">Proxy</span></div>
         <span class="service-detail" id="detail-proxy">checking...</span>
-      </div>
-      <div class="service-row" data-tip="Agent manager, chat dashboard, exec approvals">
-        <div><span class="status-dot checking" id="dot-gateway"></span><span class="service-name">Gateway</span></div>
-        <span class="service-detail" id="detail-gateway">checking...</span>
       </div>
     </div>
   </div>
@@ -373,11 +369,10 @@
   <div class="card">
     <h2>Quick Actions</h2>
     <div class="quick-actions">
-      <a class="btn primary" id="btn-chat" href="#" target="_blank" data-tip="Open chat in a new tab">Chat with Agent</a>
-      <button class="btn" onclick="copyCmd(this, 'scripts/run-openclaw.sh')" data-tip="Copy command to clipboard">Terminal Agent</button>
-      <button class="btn" onclick="copyCmd(this, 'scripts/run-claude.sh')" data-tip="Copy command to clipboard">Claude Code</button>
+      <button class="btn primary" onclick="copyCmd(this, 'scripts/run-claude.sh')" data-tip="Copy command to clipboard">Claude Code</button>
+      <button class="btn" onclick="copyCmd(this, './iterate &quot;Build a Tetris game&quot; --hours 4')" data-tip="Copy command to clipboard">Iterate</button>
       <button class="btn" onclick="copyCmd(this, './test')" data-tip="Copy command to clipboard">Run Tests</button>
-      <button class="btn" onclick="copyCmd(this, 'tail -f logs/openclaw-gateway.log')" data-tip="Copy command to clipboard">Tail Logs</button>
+      <button class="btn" onclick="copyCmd(this, 'tail -f logs/proxy.log')" data-tip="Copy command to clipboard">Tail Logs</button>
     </div>
   </div>
 
@@ -394,8 +389,6 @@
 <script>
 const OLLAMA_URL = 'http://localhost:11434';
 const PROXY_URL = 'http://localhost:8082';
-const GATEWAY_URL = 'http://localhost:18789';
-const GATEWAY_TOKEN = 'tritium-local-dev';
 let MODEL_NAME = '';
 let refreshCount = 0;
 
@@ -486,28 +479,6 @@ async function checkProxy() {
   return false;
 }
 
-async function checkGateway() {
-  try {
-    const res = await fetch(GATEWAY_URL + '/', {
-      headers: { 'Authorization': 'Bearer ' + GATEWAY_TOKEN },
-      signal: AbortSignal.timeout(3000)
-    });
-    if (res.ok) {
-      setDot('dot-gateway', 'ok');
-      $('detail-gateway').textContent = ':18789 (dashboard ready)';
-      const dashUrl = GATEWAY_URL + '/#token=' + GATEWAY_TOKEN;
-      $('btn-dashboard').href = dashUrl;
-      $('btn-chat').href = dashUrl;
-      return true;
-    }
-  } catch {}
-  setDot('dot-gateway', 'err');
-  $('detail-gateway').textContent = 'not running';
-  $('btn-dashboard').href = '#';
-  $('btn-chat').href = '#';
-  return false;
-}
-
 function updateResources() {
   const modelStatus = $('model-status').textContent;
   const modelSize = $('model-size').textContent;
@@ -537,21 +508,20 @@ async function refreshAll() {
   refreshCount++;
   const ollamaOk = await checkOllama();
   const proxyOk = await checkProxy();
-  const gatewayOk = await checkGateway();
   updateResources();
 
-  const total = [ollamaOk, proxyOk, gatewayOk].filter(Boolean).length;
+  const total = [ollamaOk, proxyOk].filter(Boolean).length;
   const hs = $('header-status');
-  if (total === 3) {
-    hs.textContent = `${total}/3 healthy`;
+  if (total === 2) {
+    hs.textContent = `${total}/2 healthy`;
     hs.className = 'header-status all-ok';
     if (refreshCount <= 1) log('All services healthy', 'ok');
   } else if (total > 0) {
-    hs.textContent = `${total}/3 running`;
+    hs.textContent = `${total}/2 running`;
     hs.className = 'header-status';
-    log(`${total}/3 services running`, 'info');
+    log(`${total}/2 services running`, 'info');
   } else {
-    hs.textContent = '0/3 running';
+    hs.textContent = '0/2 running';
     hs.className = 'header-status';
     log('No services detected. Run ./start', 'err');
   }
