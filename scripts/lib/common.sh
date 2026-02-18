@@ -264,13 +264,13 @@ detect_available_memory_gb() {
 }
 
 detect_hw_tier() {
-    local mem
-    mem=$(detect_available_memory_gb)
-    if [ "$mem" -ge 96 ] 2>/dev/null; then
+    local avail_gb
+    avail_gb=$(detect_available_memory_gb)
+    if [ "$avail_gb" -ge 96 ] 2>/dev/null; then
         echo "full"
-    elif [ "$mem" -ge 32 ] 2>/dev/null; then
+    elif [ "$avail_gb" -ge 32 ] 2>/dev/null; then
         echo "mid"
-    elif [ "$mem" -ge 16 ] 2>/dev/null; then
+    elif [ "$avail_gb" -ge 16 ] 2>/dev/null; then
         echo "low"
     else
         echo "insufficient"
