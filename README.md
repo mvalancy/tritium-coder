@@ -12,10 +12,10 @@ Give it a text description. Walk away. Come back to a working, tested, documente
 
 ```mermaid
 flowchart LR
-    Describe["Describe what\nyou want"]
-    --> Build["AI builds it\nfrom scratch"]
-    --> Validate["Health checks\nverify it works"]
-    --> Improve["AI fixes bugs,\nadds features"]
+    Describe["Describe what<br/>you want"]
+    --> Build["AI builds it<br/>from scratch"]
+    --> Validate["Health checks<br/>verify it works"]
+    --> Improve["AI fixes bugs,<br/>adds features"]
     --> Validate
 
     style Describe fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
@@ -64,10 +64,10 @@ flowchart TB
     end
 
     subgraph engine["Perpetual Iteration Engine"]
-        Health["Health Check\n(playwright)"]
-        Select["Phase Selection\n(dynamic)"]
-        Agent["AI Agent\n(openclaw)"]
-        Vision["Vision Gate\n(multi-resolution QA)"]
+        Health["Health Check<br/>(playwright)"]
+        Select["Phase Selection<br/>(dynamic)"]
+        Agent["AI Agent<br/>(openclaw)"]
+        Vision["Vision Gate<br/>(multi-resolution QA)"]
 
         Health --> Select
         Select --> Agent
@@ -77,7 +77,7 @@ flowchart TB
     end
 
     subgraph infra["Local Infrastructure"]
-        Ollama["Ollama :11434\nQwen3-Coder-Next 80B"]
+        Ollama["Ollama :11434<br/>Qwen3-Coder-Next 80B"]
         Gateway["OpenClaw Gateway :18789"]
         Proxy["claude-code-proxy :8082"]
     end
@@ -191,16 +191,16 @@ The system assumes every line of AI-generated code is broken until proven otherw
 
 ```mermaid
 flowchart TD
-    Check{"Health\nCheck"}
-    Check -->|FAIL| Fix["Fix\n(focused on specific failure)"]
-    Check -->|WARN| FixW["Fix\n(address warnings)"]
-    Check -->|PASS| Maturity{"Project\nMaturity?"}
+    Check{"Health<br/>Check"}
+    Check -->|FAIL| Fix["Fix<br/>(focused on specific failure)"]
+    Check -->|WARN| FixW["Fix<br/>(address warnings)"]
+    Check -->|PASS| Maturity{"Project<br/>Maturity?"}
 
     Maturity -->|Early| Features["Features / Improve"]
     Maturity -->|Mid| Polish["Polish / Test / Docs"]
     Maturity -->|Late| Harden["Consolidate / Refactor"]
 
-    Big{"Files > 1500\nlines?"} -->|Yes| Refactor["Refactor into modules"]
+    Big{"Files > 1500<br/>lines?"} -->|Yes| Refactor["Refactor into modules"]
 
     style Check fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
     style Fix fill:#7f1d1d,stroke:#f87171,color:#e0e0e0,stroke-width:2px
