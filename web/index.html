@@ -253,11 +253,10 @@
     <h2>Quick Actions</h2>
     <div class="quick-actions">
       <a class="btn primary" id="btn-chat" href="#" target="_blank">Chat with Agent</a>
-      <button class="btn" onclick="sendTestJob()">Send Test Job</button>
-      <button class="btn" onclick="openLogs()">View Logs</button>
-      <button class="btn" onclick="copyCmd('scripts/run-openclaw.sh')">Terminal Agent</button>
-      <button class="btn" onclick="copyCmd('scripts/run-claude.sh')">Claude Code</button>
-      <button class="btn" onclick="copyCmd('./test')">Run Tests</button>
+      <button class="btn" onclick="copyCmd('scripts/run-openclaw.sh')">Copy: Terminal Agent</button>
+      <button class="btn" onclick="copyCmd('scripts/run-claude.sh')">Copy: Claude Code</button>
+      <button class="btn" onclick="copyCmd('./test')">Copy: Run Tests</button>
+      <button class="btn" onclick="copyCmd('tail -f logs/openclaw-gateway.log')">Copy: Tail Logs</button>
     </div>
   </div>
 
@@ -276,7 +275,7 @@ const OLLAMA_URL = 'http://localhost:11434';
 const PROXY_URL = 'http://localhost:8082';
 const GATEWAY_URL = 'http://localhost:18789';
 const GATEWAY_TOKEN = 'tritium-local-dev';
-const MODEL_NAME = 'qwen3-coder-next';
+let MODEL_NAME = ''; // auto-detected from Ollama
 
 function $(id) { return document.getElementById(id); }
 
@@ -304,24 +303,33 @@ async function checkOllama() {
       setDot('dot-ollama', 'ok');
       $('detail-ollama').textContent = `:11434 (${data.models?.length || 0} models)`;
 
-      // Check model
-      const model = data.models?.find(m => m.name?.includes(MODEL_NAME));
+      // Check if any model is currently loaded (running)
+      let loadedModel = null;
+      try {
+        const ps = await fetch(OLLAMA_URL + '/api/ps', { signal: AbortSignal.timeout(3000) });
+        const psData = await ps.json();
+        if (psData.models?.length > 0) {
+          loadedModel = psData.models[0];
+          MODEL_NAME = loadedModel.name || '';
+        }
+      } catch {}
+
+      // Show model info: prefer loaded model, fall back to largest installed
+      const model = loadedModel
+        ? data.models?.find(m => m.name === loadedModel.name)
+        : data.models?.sort((a, b) => (b.size || 0) - (a.size || 0))?.[0];
+
       if (model) {
+        if (!MODEL_NAME) MODEL_NAME = model.name;
         $('model-name').textContent = model.name;
         const sizeGB = (model.size / 1e9).toFixed(1);
         $('model-size').textContent = sizeGB + ' GB';
         $('model-tools').textContent = 'Yes (native)';
+        $('model-status').textContent = loadedModel ? 'Loaded (GPU)' : 'Available (not loaded)';
       } else {
-        $('model-name').textContent = MODEL_NAME + ' (not found)';
+        $('model-name').textContent = 'No models installed';
+        $('model-status').textContent = '--';
       }
-
-      // Check if loaded
-      try {
-        const ps = await fetch(OLLAMA_URL + '/api/ps', { signal: AbortSignal.timeout(3000) });
-        const psData = await ps.json();
-        const loaded = psData.models?.find(m => m.name?.includes(MODEL_NAME));
-        $('model-status').textContent = loaded ? 'Loaded (GPU)' : 'Available (not loaded)';
-      } catch { $('model-status').textContent = 'Available'; }
 
       return true;
     }
@@ -382,24 +390,28 @@ async function checkGateway() {
 }
 
 function updateResources() {
-  // Resources are fetched via Ollama's ps endpoint (memory/GPU not directly available)
-  // We'll show estimated values based on model loading
+  // Show model loading status based on Ollama ps data
   const modelStatus = $('model-status').textContent;
+  const modelSize = $('model-size').textContent;
   if (modelStatus.includes('Loaded')) {
-    $('mem-detail').textContent = '~55 GB used (model loaded)';
-    $('mem-bar').style.width = '43%';
+    $('mem-detail').textContent = modelSize + ' (model loaded in GPU memory)';
+    $('mem-bar').style.width = '60%';
     $('mem-bar').style.background = 'var(--green)';
-    $('gpu-detail').textContent = 'Active (inference)';
-    $('gpu-bar').style.width = '65%';
+    $('gpu-detail').textContent = 'Active — model loaded';
+    $('gpu-bar').style.width = '60%';
     $('gpu-bar').style.background = 'var(--purple)';
   } else if (modelStatus.includes('Available')) {
-    $('mem-detail').textContent = 'Model not loaded';
+    $('mem-detail').textContent = 'Model downloaded, not loaded';
     $('mem-bar').style.width = '5%';
-    $('gpu-detail').textContent = 'Idle';
+    $('mem-bar').style.background = 'var(--dim)';
+    $('gpu-detail').textContent = 'Idle — run ./start to load model';
     $('gpu-bar').style.width = '5%';
+    $('gpu-bar').style.background = 'var(--dim)';
   } else {
-    $('mem-detail').textContent = '--';
-    $('gpu-detail').textContent = '--';
+    $('mem-detail').textContent = 'Ollama offline';
+    $('mem-bar').style.width = '0%';
+    $('gpu-detail').textContent = 'Ollama offline';
+    $('gpu-bar').style.width = '0%';
   }
 }
 
@@ -419,24 +431,16 @@ async function refreshAll() {
   }
 }
 
-function sendTestJob() {
-  const dashUrl = GATEWAY_URL + '/#token=' + GATEWAY_TOKEN;
-  window.open(dashUrl, '_blank');
-  log('Opened dashboard — send your task in the chat', 'info');
-}
-
-function openLogs() {
-  log('Logs: tail -f logs/openclaw-gateway.log', 'info');
-  log('  Or: openclaw logs --follow', 'info');
-  alert('Run in terminal:\n\ntail -f logs/openclaw-gateway.log\n\nOr:\n\nopenclaw logs --follow');
-}
-
 function copyCmd(cmd) {
-  navigator.clipboard?.writeText(cmd).then(() => {
-    log(`Copied to clipboard: ${cmd}`, 'info');
-  }).catch(() => {
-    log(`Run: ${cmd}`, 'info');
-  });
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(cmd).then(() => {
+      log(`Copied: ${cmd}`, 'ok');
+    }).catch(() => {
+      log(`Run in terminal: ${cmd}`, 'info');
+    });
+  } else {
+    log(`Run in terminal: ${cmd}`, 'info');
+  }
 }
 
 // Initial load
