@@ -40,13 +40,23 @@ if ! curl_check http://localhost:11434/api/tags &>/dev/null \
     echo ""
 fi
 
+# --- Quick status check ---
+OLLAMA_UP=false; PROXY_UP=false; GATEWAY_UP=false
+curl_check http://localhost:11434/api/tags &>/dev/null && OLLAMA_UP=true
+ss -tlnp 2>/dev/null | grep -q ":${PROXY_PORT} " && PROXY_UP=true
+ss -tlnp 2>/dev/null | grep -q ":${GATEWAY_PORT} " && GATEWAY_UP=true
+
+if [ "$OLLAMA_UP" = true ]; then log_ok "Ollama"; else log_fail "Ollama not running"; fi
+if [ "$PROXY_UP" = true ]; then log_ok "Proxy"; else log_fail "Proxy not running"; fi
+if [ "$GATEWAY_UP" = true ]; then log_ok "Gateway"; else log_warn "Gateway not running"; fi
+
 PANEL_DIR="$PROJECT_DIR/web"
 
 ensure_dir "$LOG_DIR"
 
-# Check if something is already serving our panel
+# Start or confirm control panel
 if ss -tlnp 2>/dev/null | grep -q ":${PANEL_PORT} "; then
-    log_ok "Control panel already running"
+    log_ok "Control panel"
 else
     BIND_ADDR=$(get_bind_addr)
     log_run "Starting control panel on port ${PANEL_PORT} (bind ${BIND_ADDR})..."
