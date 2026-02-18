@@ -102,6 +102,18 @@ CYCLE=0
 VISION_FEEDBACK=""
 CYCLE_HISTORY=""   # Running log of what was done each cycle (fed to agent for memory)
 
+# Health check state — persists across cycles
+HEALTH_STATUS=""           # Last health check result (PASS/WARN/FAIL)
+HEALTH_DETAILS=""          # Human-readable details
+HEALTH_JS_ERRORS=0         # Count of JS console errors
+HEALTH_RENDERS=false       # Did the page render visible content?
+HEALTH_LOADS=false         # Did the page load at all?
+HEALTH_INTERACTIVE=false   # Did interactions produce state changes?
+HEALTH_FILE_SIZES=""       # "file:lines" pairs for large files
+LAST_HEALTH_CYCLE=0        # Last cycle we ran health check
+CONSECUTIVE_FAILS=0        # How many health checks failed in a row
+PHASE_SCORES=""            # Rolling phase confidence scores
+
 # =============================================================================
 #  Helpers
 # =============================================================================
@@ -119,7 +131,466 @@ ${entry}"
     CYCLE_HISTORY=$(echo "$CYCLE_HISTORY" | tail -10)
 }
 
-# Build a context prefix shared by all prompts: CLAUDE.md + cycle history
+# Record a phase confidence score (agent self-rating or computed)
+record_score() {
+    local phase="$1" score="$2"
+    PHASE_SCORES="${PHASE_SCORES}
+${phase}:${score}"
+    PHASE_SCORES=$(echo "$PHASE_SCORES" | tail -20)
+}
+
+# Maturity tier: early (cycles 1-3), mid (4-10), late (11+)
+# Changes the tone and focus of prompts
+maturity_tier() {
+    if [ "$CYCLE" -le 3 ]; then
+        echo "early"
+    elif [ "$CYCLE" -le 10 ]; then
+        echo "mid"
+    else
+        echo "late"
+    fi
+}
+
+maturity_guidance() {
+    case "$(maturity_tier)" in
+        early)
+            echo "MATURITY: EARLY — Focus on getting it working. Don't over-polish yet. Make sure the core works."
+            ;;
+        mid)
+            echo "MATURITY: MID — The core should work. Focus on quality, polish, and robustness."
+            ;;
+        late)
+            echo "MATURITY: LATE — The project should be solid. Focus on edge cases, performance, and bulletproofing."
+            ;;
+    esac
+}
+
+# Measure file sizes and flag large ones
+measure_files() {
+    HEALTH_FILE_SIZES=""
+    local large_files=""
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local lines
+        lines=$(wc -l < "$f" 2>/dev/null || echo 0)
+        local rel="${f#${OUTPUT_DIR}/}"
+        if [ "$lines" -gt 800 ]; then
+            large_files="${large_files}
+  ${rel}: ${lines} lines"
+        fi
+    done < <(find "$OUTPUT_DIR" -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.py' \) -not -path '*/screenshots/*' -not -path '*/docs/*' 2>/dev/null)
+    HEALTH_FILE_SIZES="$large_files"
+}
+
+# =============================================================================
+#  Health Check — "Does this app work? How do we know?"
+#
+#  Loads the app in playwright, checks:
+#  1. Does it load without crashing?
+#  2. Are there JS console errors?
+#  3. Does it render visible content (not blank)?
+#  4. Do interactions produce state changes?
+#  5. Does it survive 10 seconds without crashing?
+#
+#  Produces: HEALTH_STATUS (PASS/WARN/FAIL), HEALTH_DETAILS (human readable)
+# =============================================================================
+
+run_health_check() {
+    local html_file
+    html_file=$(find "$OUTPUT_DIR" -name 'index.html' -maxdepth 1 | head -1)
+
+    # Non-web projects: check for syntax errors in Python/JS files
+    if [ -z "$html_file" ]; then
+        run_headless_health_check
+        return
+    fi
+
+    log_to "HEALTH checking: does this app actually work?"
+
+    local hc_dir="/tmp/tritium-health-${PROJECT_NAME}"
+    rm -rf "$hc_dir"
+    mkdir -p "$hc_dir"
+
+    # Write the health check script
+    cat > "${hc_dir}/check.py" << 'HCEOF'
+import sys, os, time, json
+
+html_path = sys.argv[1]
+result_path = sys.argv[2]
+
+result = {
+    "loads": False,
+    "renders": False,
+    "interactive": False,
+    "js_errors": [],
+    "crash": None,
+    "visible_elements": 0,
+    "canvas_pixels": 0,
+    "state_changes": 0,
+    "survival_secs": 0,
+}
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    result["crash"] = "playwright not available"
+    with open(result_path, "w") as f:
+        json.dump(result, f)
+    sys.exit(0)
+
+try:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
+
+        # Capture ALL console errors
+        errors = []
+        page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+
+        # Capture page crashes
+        page.on("pageerror", lambda err: errors.append(f"PAGE CRASH: {err}"))
+
+        # 1. LOAD TEST — does it load at all?
+        try:
+            page.goto(f"file://{html_path}", wait_until="networkidle", timeout=15000)
+            result["loads"] = True
+        except Exception as e:
+            result["crash"] = f"Failed to load: {e}"
+            result["js_errors"] = errors
+            with open(result_path, "w") as f:
+                json.dump(result, f)
+            browser.close()
+            sys.exit(0)
+
+        time.sleep(2)
+
+        # 2. RENDER TEST — is there visible content?
+        try:
+            # Check for visible elements
+            visible = page.evaluate("""() => {
+                const els = document.querySelectorAll('canvas, img, div, span, p, h1, h2, h3, button, a, svg');
+                let count = 0;
+                els.forEach(el => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) count++;
+                });
+                return count;
+            }""")
+            result["visible_elements"] = visible
+            result["renders"] = visible > 0
+
+            # Check canvas content (non-blank pixels)
+            canvas_check = page.evaluate("""() => {
+                const c = document.querySelector('canvas');
+                if (!c) return 0;
+                try {
+                    const ctx = c.getContext('2d');
+                    if (!ctx) return -1;  // might be webgl
+                    const data = ctx.getImageData(0, 0, c.width, c.height).data;
+                    let nonBlank = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        if (data[i] > 0 || data[i+1] > 0 || data[i+2] > 0) nonBlank++;
+                    }
+                    return nonBlank;
+                } catch(e) {
+                    return -1;  // webgl or tainted
+                }
+            }""")
+            result["canvas_pixels"] = canvas_check
+            if canvas_check > 100:
+                result["renders"] = True
+            elif canvas_check == -1:
+                result["renders"] = True  # WebGL — assume it's rendering
+
+        except Exception as e:
+            errors.append(f"Render check error: {e}")
+
+        # 3. INTERACTION TEST — do inputs change state?
+        try:
+            # Snapshot DOM state before interactions
+            before_state = page.evaluate("""() => {
+                const c = document.querySelector('canvas');
+                const texts = Array.from(document.querySelectorAll('*'))
+                    .map(e => e.textContent).join('').slice(0, 500);
+                return { textLen: texts.length, bodyHTML: document.body.innerHTML.length };
+            }""")
+
+            # Try starting the game / interacting
+            for key in ["Enter", " "]:
+                page.keyboard.press(key)
+                time.sleep(0.3)
+
+            import random
+            for _ in range(15):
+                page.keyboard.press(random.choice(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "]))
+                time.sleep(0.15)
+
+            time.sleep(1)
+
+            # Snapshot after
+            after_state = page.evaluate("""() => {
+                const texts = Array.from(document.querySelectorAll('*'))
+                    .map(e => e.textContent).join('').slice(0, 500);
+                return { textLen: texts.length, bodyHTML: document.body.innerHTML.length };
+            }""")
+
+            changes = 0
+            if before_state["textLen"] != after_state["textLen"]:
+                changes += 1
+            if before_state["bodyHTML"] != after_state["bodyHTML"]:
+                changes += 1
+
+            result["state_changes"] = changes
+            result["interactive"] = changes > 0
+
+        except Exception as e:
+            errors.append(f"Interaction test error: {e}")
+
+        # 4. SURVIVAL TEST — does it crash after 10 seconds?
+        try:
+            start = time.time()
+            for sec in range(10):
+                time.sleep(1)
+                # Check if page is still alive
+                page.evaluate("1+1")
+            result["survival_secs"] = int(time.time() - start)
+        except Exception as e:
+            result["survival_secs"] = int(time.time() - start)
+            errors.append(f"Crashed after {result['survival_secs']}s: {e}")
+
+        result["js_errors"] = errors[:30]
+        browser.close()
+
+except Exception as e:
+    result["crash"] = str(e)
+
+with open(result_path, "w") as f:
+    json.dump(result, f, indent=2)
+HCEOF
+
+    local result_file="${hc_dir}/result.json"
+
+    if ! python3 "${hc_dir}/check.py" "$html_file" "$result_file" 2>/dev/null; then
+        HEALTH_STATUS="FAIL"
+        HEALTH_DETAILS="Health check script crashed"
+        HEALTH_LOADS=false
+        HEALTH_RENDERS=false
+        HEALTH_INTERACTIVE=false
+        HEALTH_JS_ERRORS=0
+        CONSECUTIVE_FAILS=$((CONSECUTIVE_FAILS + 1))
+        log_to "HEALTH FAIL — check script crashed"
+        rm -rf "$hc_dir"
+        return
+    fi
+
+    if [ ! -f "$result_file" ]; then
+        HEALTH_STATUS="FAIL"
+        HEALTH_DETAILS="No result produced"
+        CONSECUTIVE_FAILS=$((CONSECUTIVE_FAILS + 1))
+        log_to "HEALTH FAIL — no result file"
+        rm -rf "$hc_dir"
+        return
+    fi
+
+    # Parse results
+    local loads renders interactive js_error_count survival crash canvas_pixels
+    loads=$(python3 -c "import json; print(json.load(open('$result_file'))['loads'])" 2>/dev/null || echo "False")
+    renders=$(python3 -c "import json; print(json.load(open('$result_file'))['renders'])" 2>/dev/null || echo "False")
+    interactive=$(python3 -c "import json; print(json.load(open('$result_file'))['interactive'])" 2>/dev/null || echo "False")
+    js_error_count=$(python3 -c "import json; print(len(json.load(open('$result_file'))['js_errors']))" 2>/dev/null || echo "0")
+    survival=$(python3 -c "import json; print(json.load(open('$result_file'))['survival_secs'])" 2>/dev/null || echo "0")
+    crash=$(python3 -c "import json; r=json.load(open('$result_file')); print(r.get('crash','') or '')" 2>/dev/null || echo "")
+    canvas_pixels=$(python3 -c "import json; print(json.load(open('$result_file'))['canvas_pixels'])" 2>/dev/null || echo "0")
+
+    HEALTH_LOADS=false; [ "$loads" = "True" ] && HEALTH_LOADS=true
+    HEALTH_RENDERS=false; [ "$renders" = "True" ] && HEALTH_RENDERS=true
+    HEALTH_INTERACTIVE=false; [ "$interactive" = "True" ] && HEALTH_INTERACTIVE=true
+    HEALTH_JS_ERRORS=$js_error_count
+
+    # Read JS error details for prompts
+    local js_error_text=""
+    if [ "$js_error_count" -gt 0 ]; then
+        js_error_text=$(python3 -c "
+import json
+errors = json.load(open('$result_file'))['js_errors']
+for e in errors[:10]:
+    print(f'  - {e}')
+" 2>/dev/null || echo "")
+    fi
+
+    # Determine overall status
+    local details=""
+    if [ "$HEALTH_LOADS" != true ]; then
+        HEALTH_STATUS="FAIL"
+        details="App FAILED to load"
+        [ -n "$crash" ] && details="${details}: ${crash}"
+    elif [ "$HEALTH_RENDERS" != true ]; then
+        HEALTH_STATUS="FAIL"
+        details="App loads but renders BLANK (no visible content, canvas pixels: ${canvas_pixels})"
+    elif [ "$js_error_count" -gt 5 ]; then
+        HEALTH_STATUS="FAIL"
+        details="App renders but has ${js_error_count} JS errors — critically broken"
+    elif [ "$survival" -lt 5 ]; then
+        HEALTH_STATUS="FAIL"
+        details="App crashed within ${survival} seconds"
+    elif [ "$js_error_count" -gt 0 ]; then
+        HEALTH_STATUS="WARN"
+        details="App works but has ${js_error_count} JS error(s)"
+    elif [ "$HEALTH_INTERACTIVE" != true ]; then
+        HEALTH_STATUS="WARN"
+        details="App loads and renders but may not respond to input"
+    else
+        HEALTH_STATUS="PASS"
+        details="App loads, renders, responds to input, survived ${survival}s"
+        CONSECUTIVE_FAILS=0
+    fi
+
+    if [ -n "$js_error_text" ]; then
+        details="${details}
+JS errors:
+${js_error_text}"
+    fi
+
+    HEALTH_DETAILS="$details"
+    LAST_HEALTH_CYCLE=$CYCLE
+
+    if [ "$HEALTH_STATUS" = "FAIL" ]; then
+        CONSECUTIVE_FAILS=$((CONSECUTIVE_FAILS + 1))
+    elif [ "$HEALTH_STATUS" = "PASS" ]; then
+        CONSECUTIVE_FAILS=0
+    fi
+
+    # Also measure file sizes while we're at it
+    measure_files
+
+    log_to "HEALTH ${HEALTH_STATUS} — ${details}"
+    rm -rf "$hc_dir"
+}
+
+# Health check for non-web projects (Python, etc.)
+run_headless_health_check() {
+    log_to "HEALTH checking non-web project (syntax/import checks)"
+    local errors=""
+    local error_count=0
+
+    # Check Python files for syntax errors
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local result
+        result=$(python3 -c "import py_compile; py_compile.compile('$f', doraise=True)" 2>&1) || {
+            errors="${errors}
+  - $(basename "$f"): ${result}"
+            error_count=$((error_count + 1))
+        }
+    done < <(find "$OUTPUT_DIR" -name '*.py' -not -name '__pycache__' 2>/dev/null)
+
+    # Check JS files for basic syntax (Node if available)
+    if command -v node &>/dev/null; then
+        while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            local result
+            result=$(node --check "$f" 2>&1) || {
+                errors="${errors}
+  - $(basename "$f"): ${result}"
+                error_count=$((error_count + 1))
+            }
+        done < <(find "$OUTPUT_DIR" -name '*.js' -not -path '*/node_modules/*' 2>/dev/null)
+    fi
+
+    if [ "$error_count" -eq 0 ]; then
+        HEALTH_STATUS="PASS"
+        HEALTH_DETAILS="All files pass syntax checks"
+        HEALTH_LOADS=true
+        CONSECUTIVE_FAILS=0
+    else
+        HEALTH_STATUS="FAIL"
+        HEALTH_DETAILS="Syntax errors found:${errors}"
+        HEALTH_LOADS=false
+        CONSECUTIVE_FAILS=$((CONSECUTIVE_FAILS + 1))
+    fi
+
+    HEALTH_JS_ERRORS=$error_count
+    LAST_HEALTH_CYCLE=$CYCLE
+    measure_files
+    log_to "HEALTH ${HEALTH_STATUS} — ${HEALTH_DETAILS}"
+}
+
+# =============================================================================
+#  Dynamic Phase Selection
+#
+#  Instead of fixed rotation, look at signals and pick what matters most:
+#  - App broken (FAIL)?           → fix
+#  - App has warnings?            → fix
+#  - Files too big?               → refactor
+#  - Tests not written yet?       → test
+#  - Tests exist but not run?     → runtests
+#  - App works, early maturity?   → features
+#  - App works, mid maturity?     → improve/polish
+#  - App works, late maturity?    → consolidate/docs
+# =============================================================================
+
+select_phase() {
+    # If health check hasn't run yet (first cycle), start with health
+    if [ "$LAST_HEALTH_CYCLE" -eq 0 ] && [ "$CYCLE" -gt 1 ]; then
+        echo "fix"
+        return
+    fi
+
+    # CRITICAL: If app is broken, always fix first
+    if [ "$HEALTH_STATUS" = "FAIL" ]; then
+        # If we've failed 3+ times in a row, try a different approach
+        if [ "$CONSECUTIVE_FAILS" -ge 3 ]; then
+            log_to "PHASE  3 consecutive failures — trying runtests to diagnose"
+            echo "runtests"
+        else
+            echo "fix"
+        fi
+        return
+    fi
+
+    # WARNING: App has issues but isn't broken
+    if [ "$HEALTH_STATUS" = "WARN" ]; then
+        echo "fix"
+        return
+    fi
+
+    # FILES TOO BIG: Refactor before adding more
+    if [ -n "$HEALTH_FILE_SIZES" ]; then
+        local biggest
+        biggest=$(echo "$HEALTH_FILE_SIZES" | head -1 | grep -oP '\d+ lines' | grep -oP '\d+')
+        if [ -n "$biggest" ] && [ "$biggest" -gt 1500 ]; then
+            echo "refactor"
+            return
+        fi
+    fi
+
+    # MATURITY-BASED SELECTION
+    local tier
+    tier=$(maturity_tier)
+
+    case "$tier" in
+        early)
+            # Early: cycle through fix → improve → test → features
+            local early_phases=("improve" "test" "runtests" "features")
+            local idx=$(( (CYCLE - 1) % ${#early_phases[@]} ))
+            echo "${early_phases[$idx]}"
+            ;;
+        mid)
+            # Mid: more polish, features, docs
+            local mid_phases=("improve" "runtests" "features" "polish" "test" "docs")
+            local idx=$(( (CYCLE - 1) % ${#mid_phases[@]} ))
+            echo "${mid_phases[$idx]}"
+            ;;
+        late)
+            # Late: consolidation, docs, polish, edge cases
+            local late_phases=("consolidate" "runtests" "polish" "docs" "refactor" "test")
+            local idx=$(( (CYCLE - 1) % ${#late_phases[@]} ))
+            echo "${late_phases[$idx]}"
+            ;;
+    esac
+}
+
+# Build a context prefix shared by all prompts: CLAUDE.md + cycle history + health + maturity
 prompt_context() {
     local ctx=""
 
@@ -133,9 +604,31 @@ prompt_context() {
         fi
     done
 
+    # Core philosophy
+    ctx="${ctx}PHILOSOPHY: Take your time. Quality over speed. Trust nothing — verify everything from the USER's perspective, not just code review. Ask: 'would a real person have a good experience?'
+
+$(maturity_guidance)
+
+"
+
+    # Health status (the most important signal)
+    if [ -n "$HEALTH_STATUS" ]; then
+        ctx="${ctx}HEALTH STATUS: ${HEALTH_STATUS}
+${HEALTH_DETAILS}
+
+"
+    fi
+
+    # Large file warnings
+    if [ -n "$HEALTH_FILE_SIZES" ]; then
+        ctx="${ctx}LARGE FILES (consider splitting):${HEALTH_FILE_SIZES}
+
+"
+    fi
+
     # Include cycle history so the agent remembers what it already did
     if [ -n "$CYCLE_HISTORY" ]; then
-        ctx="${ctx}PREVIOUS ITERATIONS (what you already did — do NOT repeat, build on it):
+        ctx="${ctx}PREVIOUS ITERATIONS (do NOT repeat — build on this):
 ${CYCLE_HISTORY}
 
 "
@@ -554,22 +1047,21 @@ ${DESCRIPTION}
 
 Write all files to: ${OUTPUT_DIR}
 
+Take your time. Quality matters more than speed.
+
 Requirements:
 - Create a complete, working implementation
 - Use HTML5/CSS3/JavaScript (no external dependencies, no CDN links)
-- Make it visually polished from the start (dark theme, modern design, animations)
-- Include all game logic, rendering, input handling, and scoring
+- Make it visually polished (dark theme, modern design, animations)
 - Must work by opening index.html in a browser — fully self-contained
-- Add sound effects using Web Audio API (synthesized, no audio files)
-- Create a docs/ folder with any design notes or architecture docs
-- Create a README.md in the project root that explains:
-  - What the project is
-  - How to run it (open index.html)
-  - Controls / how to use it
-  - Features list
-  - A Screenshots section (leave placeholder: "Screenshots will be added after visual review.")
+- Separate concerns: game logic, rendering, and input in different files or clear sections
+- Create a README.md explaining what it is, how to run it, controls, and features
+- Create a docs/ folder with architecture notes
 
-Write ALL files now. Make sure the project works immediately.
+Verify your own work: after writing the code, mentally trace through what happens when
+a user opens index.html. Does the game loop start? Do controls work? Is something visible?
+
+Write ALL files now.
 PROMPT
 }
 
@@ -579,28 +1071,39 @@ prompt_fix() {
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
-VISION MODEL REVIEW (from screenshot of current state):
+VISION REVIEW FINDINGS:
 ${VISION_FEEDBACK}
+"
 
-Fix every issue the vision model identified."
+    # Focus the fix prompt on the most critical issue
+    local focus=""
+    if [ "$HEALTH_LOADS" != true ]; then
+        focus="CRITICAL: The app fails to load. This is the ONLY thing to fix right now.
+Find why it crashes on load and fix it. Nothing else matters until it loads."
+    elif [ "$HEALTH_RENDERS" != true ]; then
+        focus="CRITICAL: The app loads but shows a BLANK screen. Nothing renders.
+Find why nothing is visible and fix it. Check canvas setup, initial draw calls, CSS visibility."
+    elif [ "$HEALTH_JS_ERRORS" -gt 0 ]; then
+        focus="The app has JavaScript errors. Fix every console error.
+Each error is a bug — trace it to the source and fix the root cause, not the symptom."
+    elif [ "$HEALTH_INTERACTIVE" != true ]; then
+        focus="The app loads and renders but doesn't respond to user input.
+Check event listeners, keyboard handlers, game loop state, and input processing."
+    else
+        focus="Read every file. Find bugs: null refs, broken state transitions, render glitches, input issues.
+FIX each bug you find — don't just list them."
+    fi
 
     cat << PROMPT
-${ctx}You are iterating on a project in ${OUTPUT_DIR}.
+${ctx}You are fixing bugs in ${OUTPUT_DIR}.
 
-Read ALL source files in ${OUTPUT_DIR} to understand the current state.
+Read ALL source files first.
 
-YOUR JOB: Find and fix everything that's broken.
+${focus}${vision_section}
 
-1. Read every file carefully
-2. Trace through the logic — find bugs, null references, broken state, render issues
-3. Check all user input handling (keyboard, mouse, touch)
-4. Check game state transitions (start → play → pause → game over → restart)
-5. Check for JavaScript errors that would show in the console
-6. FIX every bug you find — don't just list them
+Write fixes directly to the files. List every bug and your fix.
 
-Write fixes directly to the files in ${OUTPUT_DIR}.${vision_section}
-
-List every bug you found and how you fixed it.
+Rate your confidence 1-10 that the app works correctly after your fixes.
 PROMPT
 }
 
@@ -610,28 +1113,47 @@ prompt_improve() {
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
-VISION MODEL REVIEW (from screenshot):
+VISION FEEDBACK:
 ${VISION_FEEDBACK}
+"
 
-Address the visual feedback above."
+    # Pick ONE improvement focus based on maturity
+    local focus=""
+    case "$(maturity_tier)" in
+        early)
+            focus="Pick the SINGLE most impactful improvement from this list and do it well:
+- Add visual polish (particle effects, smooth animations, glows)
+- Add a proper start screen with title and instructions
+- Add a game over screen with stats and 'Play Again'
+- Store high scores in localStorage"
+            ;;
+        mid)
+            focus="Pick ONE area to improve and do it thoroughly:
+- Sound effects via Web Audio API (synthesized, no audio files)
+- Difficulty progression that ramps over time
+- HUD with animated score/level transitions
+- Controls that feel responsive and satisfying"
+            ;;
+        late)
+            focus="Find the WEAKEST part of the user experience and make it great:
+- What feels unfinished? Polish it.
+- What's confusing? Clarify it.
+- What's ugly? Make it beautiful."
+            ;;
+    esac
 
     cat << PROMPT
-${ctx}You are iterating on a project in ${OUTPUT_DIR}.
+${ctx}You are improving a project in ${OUTPUT_DIR}.
 
-Read ALL source files. The project should already work. Now improve it:
+Read ALL source files first.
 
-1. Add visual polish: particle effects, screen shake, smooth animations, glows
-2. Add procedural sound effects via Web Audio API (no external audio files)
-3. Add a HUD: score, high score, lives/level with animated transitions
-4. Add difficulty progression — the experience should get harder over time
-5. Add a proper start screen with title, instructions, and "Press Start"
-6. Add a game over screen with stats, high score, and "Play Again"
-7. Store high scores in localStorage
-8. Make controls feel responsive and satisfying
+${focus}${vision_section}
 
-Write all changes to ${OUTPUT_DIR}.${vision_section}
+Do ONE thing well. Don't try to do everything at once.
 
-List every improvement you made.
+Write changes to ${OUTPUT_DIR}. Describe what you improved and why.
+
+Rate your confidence 1-10 that the improvement works correctly.
 PROMPT
 }
 
@@ -639,35 +1161,52 @@ prompt_test() {
     local ctx
     ctx=$(prompt_context)
     cat << PROMPT
-${ctx}You are testing a project in ${OUTPUT_DIR}.
+${ctx}You are writing tests for a project in ${OUTPUT_DIR}.
 
 Read ALL source files. Create or update ${OUTPUT_DIR}/test.html.
 
-IMPORTANT: Use the shared test harness at ${PROJECT_DIR}/lib/test-harness.js.
-Read that file first to understand the API (TritiumTest class).
+Use the shared test harness: ${PROJECT_DIR}/lib/test-harness.js (read it first for the API).
 
-Your test.html should:
-1. Include: <script src="../../lib/test-harness.js"></script>
-2. Include the game/app scripts
-3. Create tests:
-   const t = new TritiumTest('${PROJECT_NAME}');
-   t.test('loads without error', function() { ... });
-   t.test('canvas exists', function() { t.assertExists('canvas'); });
-   t.test('score starts at 0', function() { t.assertEqual(game.score, 0); });
-   t.run();
+Write tests as SAFETY NETS that catch CATEGORIES of problems, not individual bugs.
+Each test should protect against an entire class of failure:
 
-Test:
-- Initialization (no crash on load)
-- State management (all states reachable)
-- Scoring/data logic
-- Input handling setup
-- Rendering pipeline (canvas or DOM elements exist)
+const t = new TritiumTest('${PROJECT_NAME}');
 
-Also fix any bugs you discover while writing the tests.
+// CATEGORY: Initialization — catches all "crash on load" bugs
+t.test('app initializes without throwing', function() { ... });
 
-Write all files to ${OUTPUT_DIR}.
+// CATEGORY: Rendering — catches blank screens, missing elements, invisible UI
+t.test('visible content renders on screen', function() {
+    // Check that canvas has pixels, or DOM has visible elements
+});
 
-List every test and what it verifies.
+// CATEGORY: State management — catches broken transitions, stuck states
+t.test('all game states are reachable', function() {
+    // Verify: menu → playing → paused → game-over → menu
+});
+
+// CATEGORY: User input — catches dead controls, missing handlers
+t.test('input handlers are registered', function() {
+    // Verify keyboard/mouse/touch listeners exist and function
+});
+
+// CATEGORY: Data integrity — catches NaN scores, negative lives, overflow
+t.test('game data stays valid', function() {
+    // Score is a number, lives >= 0, level > 0, no NaN
+});
+
+// CATEGORY: Persistence — catches localStorage failures
+t.test('data survives page reload', function() {
+    // High score saves and loads correctly
+});
+
+t.run();
+
+Think: "what NET catches the most fish?" — not "what hook catches one fish?"
+
+Fix any bugs you discover while writing tests.
+
+Write to ${OUTPUT_DIR}. List every test CATEGORY and what class of bugs it catches.
 PROMPT
 }
 
@@ -677,25 +1216,28 @@ prompt_features() {
     local vision_section=""
     [ -n "$VISION_FEEDBACK" ] && vision_section="
 
-VISION MODEL FEEDBACK:
-${VISION_FEEDBACK}"
+VISION FEEDBACK:
+${VISION_FEEDBACK}
+"
 
     cat << PROMPT
-${ctx}You are adding features to a project in ${OUTPUT_DIR}.
+${ctx}You are adding ONE new feature to the project in ${OUTPUT_DIR}.
 
-Read ALL source files. The project should be stable. Now add NEW FEATURES:
+Read ALL source files first. Understand what exists.
 
-Think about what would make this project significantly better. Add 2-3 meaningful features:
-- New gameplay mechanics, power-ups, enemy types, or modes
-- Visual effects: particle trails, explosions, lightning, parallax backgrounds
-- Background music with Web Audio API (procedurally generated)
-- Mobile/touch support
-- Accessibility improvements
-- Performance optimizations
+Choose the SINGLE most impactful feature that's missing. Examples:
+- A new gameplay mechanic, power-up, or mode
+- Particle effects, explosions, or visual feedback
+- Procedural background music via Web Audio API
+- Mobile/touch controls
+- A settings menu
 
-Write all changes to ${OUTPUT_DIR}.${vision_section}
+Add ONE feature. Implement it completely. Test that it works with the existing code.
+Do NOT break what already works.${vision_section}
 
-Describe each new feature and why it improves the project.
+Write changes to ${OUTPUT_DIR}. Describe the feature and why you chose it.
+
+Rate your confidence 1-10 that the feature works without breaking anything.
 PROMPT
 }
 
@@ -732,20 +1274,23 @@ Available screenshots:"
     cat << PROMPT
 ${ctx}Final polish pass on the project in ${OUTPUT_DIR}.
 
-Read ALL source files. This is a quality review:
+Read ALL source files.
 
-1. Is the code well-structured? Refactor if it's messy.
-2. Are there any remaining bugs? Fix them.
-3. Does the visual design look professional? Improve colors, spacing, fonts.
-4. Are transitions smooth? Add CSS/canvas transitions where missing.
-5. Update README.md: explain how to play/use, list features, include screenshots
-6. Maintain docs/ folder: add architecture notes or design docs if missing
-7. Is the game/app actually fun/useful? What's the weakest part?
-8. Add any missing finishing touches.${ss_section}
+Pretend you are a user opening this for the first time. Walk through the ENTIRE experience:
 
-Write all changes to ${OUTPUT_DIR}.${vision_section}
+1. Open index.html — what do you see? Is it clear what this is and how to start?
+2. Start the app/game — is the transition smooth? Any flash of unstyled content?
+3. Use it for 30 seconds — is it satisfying? What feels off?
+4. Try to pause, restart, navigate — does everything you'd expect actually work?
+5. Look at the visual design — does it look professional or amateur? Be honest.
 
-Rate the project 1-10 and explain what would bring it to a 10.
+Fix the SINGLE biggest UX problem you find. Do it thoroughly.
+
+Also: update README.md with features list and screenshots if available.${ss_section}${vision_section}
+
+Write changes to ${OUTPUT_DIR}.
+
+Rate the project 1-10 from a USER's perspective (not code quality — user experience).
 PROMPT
 }
 
@@ -769,28 +1314,100 @@ prompt_runtests() {
     done
 
     cat << PROMPT
-${ctx}You are running tests for a project in ${OUTPUT_DIR}.
+${ctx}You are validating a project in ${OUTPUT_DIR}.
 
 ${test_info}
 
-YOUR JOB: Actually EXECUTE the tests and fix what's broken.
+TRUST NOTHING. The code may claim to work but actually be broken. Verify everything from a USER'S perspective.
 
-1. If test.html exists, open it with a headless check or read it to understand what's tested
-2. If Python tests exist, run them: cd ${OUTPUT_DIR} && python3 -m pytest or python3 test_*.py
-3. If package.json has test scripts, run: cd ${OUTPUT_DIR} && npm test
-4. If no tests exist yet, CREATE them first (use ${PROJECT_DIR}/lib/test-harness.js for web projects)
-5. Run: python3 -c "import py_compile; py_compile.compile('${OUTPUT_DIR}/FILE', doraise=True)" for Python files
-6. For JS/HTML: check for syntax errors by reading the code carefully
+YOUR JOB: Act as a user, not a code reviewer. Actually run things and check results.
 
-For ANY test failure:
-- Read the error output
-- Find the root cause in the source code
-- FIX the bug
-- Re-run to verify the fix works
+1. If test.html exists, actually EXECUTE it (open in headless browser or run the tests)
+2. If Python tests exist, run them: cd ${OUTPUT_DIR} && python3 -m pytest
+3. If no tests exist, CREATE them (use ${PROJECT_DIR}/lib/test-harness.js for web projects)
 
-Write all fixes to ${OUTPUT_DIR}.
+Validate from the USER's perspective:
+- Can a user actually start the app/game? (not "does the code look right" — actually try it)
+- Do the controls actually work? (not "are event listeners attached" — simulate input)
+- Does the score/state actually update? (not "there's a scoring function" — verify the output)
+- Can the user pause, restart, see their score?
+- What would a real user's FIRST 30 seconds look like?
 
-Report: which tests passed, which failed, what you fixed.
+For ANY failure: find root cause, FIX it, re-run to verify.
+
+Write fixes to ${OUTPUT_DIR}. Report what passed, what failed, what you fixed.
+
+Rate your confidence 1-10 that a real user would have a good experience.
+PROMPT
+}
+
+prompt_refactor() {
+    local ctx
+    ctx=$(prompt_context)
+
+    # Build specific file size info
+    local file_info=""
+    if [ -n "$HEALTH_FILE_SIZES" ]; then
+        file_info="
+These files are too large and MUST be split:${HEALTH_FILE_SIZES}
+"
+    else
+        # Measure now if we haven't
+        measure_files
+        if [ -n "$HEALTH_FILE_SIZES" ]; then
+            file_info="
+These files are too large and MUST be split:${HEALTH_FILE_SIZES}
+"
+        fi
+    fi
+
+    cat << PROMPT
+${ctx}You are refactoring the project in ${OUTPUT_DIR}.
+
+Read ALL source files first.
+${file_info}
+YOUR JOB: Improve code structure WITHOUT changing behavior.
+
+Split large files into focused modules:
+- Separate game logic from rendering from input handling
+- Extract reusable utilities into their own files
+- Use ES modules (import/export) or separate <script> tags
+- Each file should have ONE clear responsibility
+
+Rules:
+- Do NOT change what the app does — only HOW the code is organized
+- Do NOT add new features
+- Test that the app still works after refactoring
+- Update any imports/references to match new file structure
+
+Write changes to ${OUTPUT_DIR}. List every file you created, modified, or removed.
+PROMPT
+}
+
+prompt_consolidate() {
+    local ctx
+    ctx=$(prompt_context)
+
+    cat << PROMPT
+${ctx}You are cleaning up the project in ${OUTPUT_DIR}.
+
+Read ALL source files carefully.
+
+YOUR JOB: Remove waste. Find and eliminate:
+- Dead code (functions/variables that are never called)
+- Duplicate logic (same thing implemented twice)
+- Unused CSS rules
+- Commented-out code blocks
+- Console.log statements left from debugging
+- Redundant event listeners
+- Variables declared but never used
+
+Rules:
+- Do NOT change behavior — only remove what's truly unused
+- Do NOT add anything new
+- If unsure whether something is used, leave it
+
+Write changes to ${OUTPUT_DIR}. List everything you removed and why it was dead.
 PROMPT
 }
 
@@ -938,25 +1555,33 @@ if [ "$file_count" -eq 0 ]; then
 fi
 
 # =============================================================================
-#  Main loop: fix → improve → test → features → polish
-#  Vision gate runs AFTER test and polish phases (when the agent thinks it's good)
+#  Main loop — dynamic phase selection
+#
+#  Each cycle:
+#    1. Health check (does it work?)
+#    2. Select phase based on health + maturity + signals
+#    3. Run ONE focused prompt (ask for 1 thing, do it well)
+#    4. Git checkpoint on constructive phases
+#    5. Vision gate on polish/runtests (when app should be good)
+#
+#  Philosophy: trade time for quality. One thing done right > many things half-done.
 # =============================================================================
-
-# Phases rotate: fix → improve → runtests → features → polish → test (write tests)
-# "runtests" actually executes tests and fixes failures
-# "test" writes/updates test files
-# Vision gate fires after polish and runtests (agent thinks it's in good shape)
-PHASES=("fix" "improve" "runtests" "features" "polish" "test" "docs")
 
 while [ "$(time_remaining)" -gt 300 ]; do
     CYCLE=$((CYCLE + 1))
     remaining=$(time_remaining)
-    phase_idx=$(( (CYCLE - 1) % ${#PHASES[@]} ))
-    phase="${PHASES[$phase_idx]}"
+
+    # ----- HEALTH CHECK (every cycle — this is how we know it works) -----
+    if [ "$CAN_SCREENSHOT" = true ] || [ "$CYCLE" -eq 1 ]; then
+        run_health_check
+    fi
+
+    # ----- SELECT PHASE (based on health, maturity, signals) -----
+    phase=$(select_phase)
 
     echo ""
     log_to "================================================================"
-    log_to "CYCLE  #${CYCLE}  phase=${phase}  elapsed=$(($(elapsed_secs) / 60))m  remaining=$((remaining / 60))m"
+    log_to "CYCLE  #${CYCLE}  phase=${phase}  health=${HEALTH_STATUS}  tier=$(maturity_tier)  elapsed=$(($(elapsed_secs) / 60))m  remaining=$((remaining / 60))m"
     log_to "================================================================"
 
     # ----- CODE PASS (coder model stays loaded) -----
@@ -964,13 +1589,15 @@ while [ "$(time_remaining)" -gt 300 ]; do
 
     local_prompt=""
     case "$phase" in
-        fix)      local_prompt=$(prompt_fix) ;;
-        improve)  local_prompt=$(prompt_improve) ;;
-        test)     local_prompt=$(prompt_test) ;;
-        runtests) local_prompt=$(prompt_runtests) ;;
-        features) local_prompt=$(prompt_features) ;;
-        polish)   local_prompt=$(prompt_polish) ;;
-        docs)     local_prompt=$(prompt_docs) ;;
+        fix)          local_prompt=$(prompt_fix) ;;
+        improve)      local_prompt=$(prompt_improve) ;;
+        test)         local_prompt=$(prompt_test) ;;
+        runtests)     local_prompt=$(prompt_runtests) ;;
+        features)     local_prompt=$(prompt_features) ;;
+        polish)       local_prompt=$(prompt_polish) ;;
+        docs)         local_prompt=$(prompt_docs) ;;
+        refactor)     local_prompt=$(prompt_refactor) ;;
+        consolidate)  local_prompt=$(prompt_consolidate) ;;
     esac
 
     iter_timeout=900
@@ -982,7 +1609,7 @@ while [ "$(time_remaining)" -gt 300 ]; do
 
     if [ -n "$response" ]; then
         log_to "CODE   response_len=${#response}"
-        # Extract summary for cycle history
+        # Extract summary and confidence score
         local summary
         summary=$(echo "$response" | python3 -c "
 import sys,json
@@ -997,36 +1624,53 @@ except:
         echo "$summary"
         echo ""
         record_cycle "$phase" "$summary"
+
+        # Try to extract confidence score from response
+        local score
+        score=$(echo "$response" | python3 -c "
+import sys,re
+text = sys.stdin.read()
+# Look for patterns like 'confidence: 8' or 'confidence 8/10' or 'rate: 7'
+m = re.search(r'(?:confidence|rate)[:\s]+(\d+)', text, re.IGNORECASE)
+if m: print(m.group(1))
+else: print('')
+" 2>/dev/null || echo "")
+        [ -n "$score" ] && record_score "$phase" "$score"
     else
         log_to "CODE   response=EMPTY (may have timed out)"
         record_cycle "$phase" "No response (timeout or error)"
     fi
 
-    # ----- GIT CHECKPOINT (after improve, features, polish — constructive phases) -----
-    if [ "$phase" = "improve" ] || [ "$phase" = "features" ] || [ "$phase" = "polish" ] || [ "$phase" = "docs" ]; then
-        git_checkpoint "cycle-${CYCLE}-${phase}"
-    fi
+    # ----- GIT CHECKPOINT (after constructive phases) -----
+    case "$phase" in
+        improve|features|polish|docs|refactor|consolidate)
+            git_checkpoint "cycle-${CYCLE}-${phase}"
+            ;;
+    esac
 
-    # ----- VISION GATE (only after runtests or polish — when the agent thinks it's good) -----
+    # ----- VISION GATE (after polish or runtests — when app should be in good shape) -----
     if [ "$phase" = "runtests" ] || [ "$phase" = "polish" ]; then
-        log_to "VISION GATE triggered after ${phase} phase"
-        run_vision_gate
-        # If vision produced feedback, run an immediate fix pass to address it
-        if [ -n "$VISION_FEEDBACK" ]; then
-            log_to "VISION FIX — addressing vision gate feedback"
-            load_model "$CODER_MODEL"
-            local_prompt=$(prompt_fix)
-            iter_timeout=900
-            remaining=$(time_remaining)
-            [ "$remaining" -lt "$iter_timeout" ] && iter_timeout=$remaining
-            if [ "$iter_timeout" -gt 60 ]; then
-                response=$(agent_code "$local_prompt" "$iter_timeout")
-                log_to "VISION FIX response_len=${#response}"
-                record_cycle "vision-fix" "Fixed issues from vision review"
-                git_checkpoint "cycle-${CYCLE}-vision-fix"
+        if [ "$HEALTH_STATUS" != "FAIL" ]; then
+            log_to "VISION GATE triggered after ${phase} phase"
+            run_vision_gate
+            # If vision produced feedback, run an immediate fix pass
+            if [ -n "$VISION_FEEDBACK" ]; then
+                log_to "VISION FIX — addressing vision gate feedback"
+                load_model "$CODER_MODEL"
+                local_prompt=$(prompt_fix)
+                iter_timeout=900
+                remaining=$(time_remaining)
+                [ "$remaining" -lt "$iter_timeout" ] && iter_timeout=$remaining
+                if [ "$iter_timeout" -gt 60 ]; then
+                    response=$(agent_code "$local_prompt" "$iter_timeout")
+                    log_to "VISION FIX response_len=${#response}"
+                    record_cycle "vision-fix" "Fixed issues from vision review"
+                    git_checkpoint "cycle-${CYCLE}-vision-fix"
+                fi
+                VISION_FEEDBACK=""
             fi
-            # Clear vision feedback after it's been addressed
-            VISION_FEEDBACK=""
+        else
+            log_to "VISION GATE skipped — app is broken (health=FAIL)"
         fi
     fi
 
@@ -1035,14 +1679,19 @@ except:
 done
 
 # =============================================================================
-#  Summary
+#  Final health check + summary
 # =============================================================================
 
 TOTAL_TIME=$(elapsed_secs)
-log_to "DONE   cycles=${CYCLE} total_time=${TOTAL_TIME}s"
+
+# Run one final health check to know the ending state
+run_health_check
+log_to "FINAL HEALTH: ${HEALTH_STATUS} — ${HEALTH_DETAILS}"
 
 # Final git checkpoint
-git_checkpoint "final — ${CYCLE} cycles in $((TOTAL_TIME / 60))m"
+git_checkpoint "final — ${CYCLE} cycles in $((TOTAL_TIME / 60))m — health:${HEALTH_STATUS}"
+
+log_to "DONE   cycles=${CYCLE} total_time=${TOTAL_TIME}s health=${HEALTH_STATUS}"
 
 echo ""
 echo "=========================================="
@@ -1050,17 +1699,21 @@ echo "  Iteration complete: ${PROJECT_NAME}"
 echo "  Cycles:    ${CYCLE}"
 echo "  Duration:  $((TOTAL_TIME / 60)) minutes"
 echo "  Output:    ${OUTPUT_DIR}"
+echo "  Health:    ${HEALTH_STATUS}"
 echo "=========================================="
 echo ""
+echo "  Health details: ${HEALTH_DETAILS}"
+echo ""
 echo "  Files:"
-find "$OUTPUT_DIR" -type f | sort | while read -r f; do
+find "$OUTPUT_DIR" -type f -not -path '*/screenshots/*' | sort | while read -r f; do
+    local size lines
     size=$(wc -c < "$f")
-    rel="${f#${OUTPUT_DIR}/}"
-    echo "    ${rel}  (${size} bytes)"
+    lines=$(wc -l < "$f" 2>/dev/null || echo "?")
+    local rel="${f#${OUTPUT_DIR}/}"
+    echo "    ${rel}  (${size} bytes, ${lines} lines)"
 done
 echo ""
 if [ -d "${OUTPUT_DIR}/screenshots" ]; then
-    local ss_count
     ss_count=$(find "${OUTPUT_DIR}/screenshots" -name '*.png' 2>/dev/null | wc -l)
     echo "  Screenshots: ${ss_count} in ${OUTPUT_DIR}/screenshots/"
 fi
@@ -1069,6 +1722,13 @@ if [ -f "${OUTPUT_DIR}/README.md" ]; then
 fi
 if [ -d "${OUTPUT_DIR}/docs" ]; then
     echo "  Docs:        ${OUTPUT_DIR}/docs/"
+fi
+if [ -n "$PHASE_SCORES" ]; then
+    echo ""
+    echo "  Confidence scores:"
+    echo "$PHASE_SCORES" | while IFS=: read -r p s; do
+        [ -n "$p" ] && echo "    ${p}: ${s}/10"
+    done
 fi
 echo ""
 echo "  View: python3 -m http.server 8080 -d ${OUTPUT_DIR}"
