@@ -17,6 +17,11 @@ flowchart LR
     --> Validate["Health checks\nverify it works"]
     --> Improve["AI fixes bugs,\nadds features"]
     --> Validate
+
+    style Describe fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Build fill:#16213e,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
+    style Validate fill:#0f3460,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Improve fill:#16213e,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
 ```
 
 The loop runs for as long as you let it. Each cycle:
@@ -82,6 +87,19 @@ flowchart TB
     Gateway --> Ollama
     Vision --> Ollama
     Proxy --> Ollama
+
+    style user fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style engine fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
+    style infra fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+
+    style CLI fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Health fill:#064e3b,stroke:#34d399,color:#e0e0e0,stroke-width:2px
+    style Select fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
+    style Agent fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
+    style Vision fill:#0f3460,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Ollama fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Gateway fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Proxy fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 ```
 
 **The stack** (every piece is swappable):
@@ -183,6 +201,16 @@ flowchart TD
     Maturity -->|Late| Harden["Consolidate / Refactor"]
 
     Big{"Files > 1500\nlines?"} -->|Yes| Refactor["Refactor into modules"]
+
+    style Check fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
+    style Fix fill:#7f1d1d,stroke:#f87171,color:#e0e0e0,stroke-width:2px
+    style FixW fill:#78350f,stroke:#fbbf24,color:#e0e0e0,stroke-width:2px
+    style Maturity fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Features fill:#064e3b,stroke:#34d399,color:#e0e0e0,stroke-width:2px
+    style Polish fill:#1a1a2e,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
+    style Harden fill:#1e3a5f,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
+    style Big fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
+    style Refactor fill:#1a1a2e,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 ```
 
 ---
