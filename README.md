@@ -6,7 +6,7 @@ Give it a text description. Walk away. Come back to a working, tested, documente
 
 *By Matthew Valancy | Valpatel Software | (c) 2026*
 
-> **Why not ~~OpenClaw~~?** We started with OpenClaw as our agent framework. After 1 hour of development time (8 hours real-time on local hardware), it became clear: we need full independence. No OpenAI-affiliated dependencies. No external agent frameworks. Tritium Coder handles its own orchestration, session management, health checks, and security — natively, offline, with zero phone-home. The whole point is sovereignty over your AI stack and with partners you can trust, like Anthropic.
+> **On OpenClaw:** We started with OpenClaw as our agent framework. It had good ideas — session persistence, audit trails, security policies, multi-agent coordination. But it's OpenAI now, so it's dead in the water for us. We took the best architectural patterns and rebuilt them natively on Anthropic's Claude Code with offline models via Ollama. No cloud APIs, no phone-home, no OpenAI affiliation. See [docs/roadmap.md](docs/roadmap.md) for where we're headed.
 
 ---
 
@@ -230,6 +230,7 @@ flowchart TD
 
 | Doc | What's in it |
 |-----|-------------|
+| **[docs/roadmap.md](docs/roadmap.md)** | Vision and roadmap — universal project types, infrastructure, multi-agent |
 | **[docs/usage.md](docs/usage.md)** | All workflows — Claude Code, Ollama API, iteration engine |
 | **[docs/architecture.md](docs/architecture.md)** | System architecture, request flow, component diagrams |
 | **[docs/security.md](docs/security.md)** | Security model — what the agent can and cannot do |
