@@ -655,14 +655,26 @@ ${CYCLE_HISTORY}
 agent_code() {
     local prompt="$1"
     local timeout="${2:-900}"
-    # Use gateway mode (not --local) so the agent has full tool access:
-    # file read/write, shell exec, etc. The gateway must be running.
-    OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-tritium-local-dev}" \
-    openclaw agent \
-        --session-id "$SESSION_ID" \
-        --message "$prompt" \
-        --thinking medium \
-        --timeout "$timeout" 2>/dev/null || echo ""
+
+    # Claude Code as the coding agent, talking to Ollama through the proxy.
+    # Uses --continue to maintain session context across cycles within
+    # the same project directory. First call creates the session, subsequent
+    # calls resume it — Claude Code remembers what it already did.
+    local continue_flag=""
+    if [ "$CYCLE" -gt 1 ] || [ -d "${OUTPUT_DIR}/.claude" ]; then
+        continue_flag="--continue"
+    fi
+
+    ANTHROPIC_BASE_URL="http://localhost:${PROXY_PORT:-8082}" \
+    ANTHROPIC_API_KEY="local-model" \
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    CLAUDECODE="" \
+    timeout "$timeout" claude -p "$prompt" \
+        --dangerously-skip-permissions \
+        -d "$OUTPUT_DIR" \
+        --output-format text \
+        $continue_flag \
+        2>/dev/null || echo ""
 }
 
 unload_model() {
@@ -1509,6 +1521,7 @@ section "Iterate: ${PROJECT_NAME}"
 echo "  Description: ${DESCRIPTION}"
 echo "  Output:      ${OUTPUT_DIR}"
 echo "  Duration:    ${HOURS} hours"
+echo "  Agent:       Claude Code (via proxy → Ollama)"
 echo "  Coder:       ${CODER_MODEL}"
 echo "  Vision:      ${VISION_MODEL} ($([ "$USE_VISION" = true ] && echo "enabled" || echo "disabled"))"
 echo "  Session:     ${SESSION_ID}"
@@ -1519,7 +1532,8 @@ log_to "       description=${DESCRIPTION}"
 
 ensure_ollama  || exit 1
 ensure_model   || exit 1
-ensure_gateway || { log_fail "Gateway required for build-project (agent needs file tools)"; exit 1; }
+ensure_proxy   || { log_fail "Proxy required (Claude Code talks to Ollama through it)"; exit 1; }
+require_cmd claude || { log_fail "Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code"; exit 1; }
 
 # Check vision capability
 CAN_SCREENSHOT=false

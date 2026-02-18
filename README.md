@@ -66,18 +66,18 @@ flowchart TB
     subgraph engine["Perpetual Iteration Engine<br/>(build-project.sh)"]
         Health["Health Check<br/>playwright loads the app,<br/>checks for crashes"]
         Select["Phase Selection<br/>picks fix / improve / refactor<br/>based on health + maturity"]
-        OC["openclaw agent<br/>sends focused prompts<br/>per phase"]
+        CC["Claude Code<br/>reads, writes, and runs code<br/>one focused task per cycle"]
         Vision["Vision Gate<br/>screenshots at 5 resolutions"]
 
         Health --> Select
-        Select --> OC
-        OC --> Health
-        OC -.->|"after polish"| Vision
-        Vision -.->|"feedback"| OC
+        Select --> CC
+        CC --> Health
+        CC -.->|"after polish"| Vision
+        Vision -.->|"feedback"| CC
     end
 
-    subgraph gateway["OpenClaw Gateway :18789"]
-        Tools["Tool Access<br/>file read/write, shell exec"]
+    subgraph proxy["claude-code-proxy :8082"]
+        Trans["Anthropic API → OpenAI API"]
     end
 
     subgraph gpu["Local GPU (Ollama :11434)"]
@@ -86,30 +86,23 @@ flowchart TB
     end
 
     CLI --> Health
-    OC -->|"prompt + tool calls"| Tools
-    Tools -->|"inference"| Coder
+    CC -->|"prompts"| Trans
+    Trans -->|"inference"| Coder
     Vision -->|"screenshot + prompt"| VisionM
 
     style user fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style engine fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
-    style gateway fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style proxy fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
     style gpu fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 
     style CLI fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style Health fill:#064e3b,stroke:#34d399,color:#e0e0e0,stroke-width:2px
     style Select fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
-    style OC fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
+    style CC fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
     style Vision fill:#0f3460,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
-    style Tools fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style Trans fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
     style Coder fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
     style VisionM fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
-```
-
-**Interactive use** (separate from the iteration engine):
-
-```bash
-scripts/run-claude.sh       # Claude Code → claude-code-proxy → Ollama
-scripts/run-openclaw.sh     # OpenClaw agent → Gateway → Ollama
 ```
 
 **The stack** (every piece is swappable):
