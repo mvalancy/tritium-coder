@@ -136,6 +136,12 @@ CONFIG_DIR="$PROJECT_DIR/config"
 ensure_dir "$LOG_DIR"
 TRITIUM_LOG="$LOG_DIR/tritium.log"
 
+# Trim log if over 1000 lines — keep the most recent 500
+if [ -f "$TRITIUM_LOG" ] && [ "$(wc -l < "$TRITIUM_LOG")" -gt 1000 ]; then
+    tail -n 500 "$TRITIUM_LOG" > "$TRITIUM_LOG.tmp"
+    mv "$TRITIUM_LOG.tmp" "$TRITIUM_LOG"
+fi
+
 # --- Timing helpers ---
 _timer_start=0
 timer_start() { _timer_start=$(date +%s); }
