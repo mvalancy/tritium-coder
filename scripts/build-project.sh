@@ -495,6 +495,24 @@ ${fb}"
 
     # Unload vision model
     unload_model "$VISION_MODEL"
+
+    # --- Persist best screenshots to project's screenshots/ folder ---
+    local proj_ss_dir="${OUTPUT_DIR}/screenshots"
+    mkdir -p "$proj_ss_dir"
+    # Keep one representative screenshot per resolution (the initial load and gameplay)
+    for entry in "${VISION_RESOLUTIONS[@]}"; do
+        read -r w h label <<< "$entry"
+        for pick in "01_initial_load" "05_during_gameplay" "08_pause_attempt" "15_final_state"; do
+            local src="${ss_dir}/${label}_${pick}.png"
+            if [ -f "$src" ]; then
+                cp "$src" "${proj_ss_dir}/${label}_${pick}.png"
+            fi
+        done
+    done
+    local saved_count
+    saved_count=$(find "$proj_ss_dir" -name '*.png' 2>/dev/null | wc -l)
+    log_to "SCREENSHOTS saved ${saved_count} to ${proj_ss_dir}"
+
     rm -rf "$ss_dir"
     sleep 2
 
@@ -543,6 +561,13 @@ Requirements:
 - Include all game logic, rendering, input handling, and scoring
 - Must work by opening index.html in a browser — fully self-contained
 - Add sound effects using Web Audio API (synthesized, no audio files)
+- Create a docs/ folder with any design notes or architecture docs
+- Create a README.md in the project root that explains:
+  - What the project is
+  - How to run it (open index.html)
+  - Controls / how to use it
+  - Features list
+  - A Screenshots section (leave placeholder: "Screenshots will be added after visual review.")
 
 Write ALL files now. Make sure the project works immediately.
 PROMPT
@@ -683,6 +708,27 @@ prompt_polish() {
 VISION MODEL REVIEW:
 ${VISION_FEEDBACK}"
 
+    # Build screenshot markdown references if screenshots/ exists
+    local ss_section=""
+    if [ -d "${OUTPUT_DIR}/screenshots" ]; then
+        local ss_files
+        ss_files=$(find "${OUTPUT_DIR}/screenshots" -name '*.png' 2>/dev/null | sort)
+        if [ -n "$ss_files" ]; then
+            ss_section="
+
+SCREENSHOTS: The screenshots/ folder contains captured screenshots of the project.
+Update ${OUTPUT_DIR}/README.md to include them. Use relative paths like:
+![Desktop 1080p](screenshots/desktop-1080p_01_initial_load.png)
+![Gameplay](screenshots/desktop-720p_05_during_gameplay.png)
+
+Available screenshots:"
+            while IFS= read -r ss_file; do
+                ss_section="${ss_section}
+  - screenshots/$(basename "$ss_file")"
+            done <<< "$ss_files"
+        fi
+    fi
+
     cat << PROMPT
 ${ctx}Final polish pass on the project in ${OUTPUT_DIR}.
 
@@ -692,9 +738,10 @@ Read ALL source files. This is a quality review:
 2. Are there any remaining bugs? Fix them.
 3. Does the visual design look professional? Improve colors, spacing, fonts.
 4. Are transitions smooth? Add CSS/canvas transitions where missing.
-5. Does the README.md exist and explain how to play/use?
-6. Is the game/app actually fun/useful? What's the weakest part?
-7. Add any missing finishing touches.
+5. Update README.md: explain how to play/use, list features, include screenshots
+6. Maintain docs/ folder: add architecture notes or design docs if missing
+7. Is the game/app actually fun/useful? What's the weakest part?
+8. Add any missing finishing touches.${ss_section}
 
 Write all changes to ${OUTPUT_DIR}.${vision_section}
 
@@ -744,6 +791,59 @@ For ANY test failure:
 Write all fixes to ${OUTPUT_DIR}.
 
 Report: which tests passed, which failed, what you fixed.
+PROMPT
+}
+
+prompt_docs() {
+    local ctx
+    ctx=$(prompt_context)
+
+    # Build list of available screenshots
+    local ss_list=""
+    if [ -d "${OUTPUT_DIR}/screenshots" ]; then
+        local ss_files
+        ss_files=$(find "${OUTPUT_DIR}/screenshots" -name '*.png' 2>/dev/null | sort)
+        if [ -n "$ss_files" ]; then
+            ss_list="
+
+Available screenshots in screenshots/:"
+            while IFS= read -r ss_file; do
+                ss_list="${ss_list}
+  - screenshots/$(basename "$ss_file")"
+            done <<< "$ss_files"
+        fi
+    fi
+
+    cat << PROMPT
+${ctx}You are updating documentation for the project in ${OUTPUT_DIR}.
+
+Read ALL source files and any existing docs/ and README.md.
+
+YOUR JOB: Make sure this project is well-documented.
+
+1. README.md (project root) — must include:
+   - Project title and one-line description
+   - How to run it (open index.html, etc.)
+   - Controls / usage instructions
+   - Full features list (everything the project does)
+   - Screenshots section with embedded images from screenshots/ folder
+   - Known issues or limitations (if any)
+
+2. docs/ folder — create or update:
+   - Architecture overview (how the code is structured, key modules)
+   - Any design decisions worth documenting
+${ss_list}
+
+For screenshots in README.md, use relative paths:
+![Title Screen](screenshots/desktop-1080p_01_initial_load.png)
+![Gameplay](screenshots/desktop-720p_05_during_gameplay.png)
+![Mobile View](screenshots/mobile-iphone_01_initial_load.png)
+
+Include screenshots at multiple resolutions to show responsiveness.
+
+Write all changes to ${OUTPUT_DIR}.
+
+List every doc file you created or updated.
 PROMPT
 }
 
@@ -846,7 +946,7 @@ fi
 # "runtests" actually executes tests and fixes failures
 # "test" writes/updates test files
 # Vision gate fires after polish and runtests (agent thinks it's in good shape)
-PHASES=("fix" "improve" "runtests" "features" "polish" "test")
+PHASES=("fix" "improve" "runtests" "features" "polish" "test" "docs")
 
 while [ "$(time_remaining)" -gt 300 ]; do
     CYCLE=$((CYCLE + 1))
@@ -870,6 +970,7 @@ while [ "$(time_remaining)" -gt 300 ]; do
         runtests) local_prompt=$(prompt_runtests) ;;
         features) local_prompt=$(prompt_features) ;;
         polish)   local_prompt=$(prompt_polish) ;;
+        docs)     local_prompt=$(prompt_docs) ;;
     esac
 
     iter_timeout=900
@@ -902,7 +1003,7 @@ except:
     fi
 
     # ----- GIT CHECKPOINT (after improve, features, polish — constructive phases) -----
-    if [ "$phase" = "improve" ] || [ "$phase" = "features" ] || [ "$phase" = "polish" ]; then
+    if [ "$phase" = "improve" ] || [ "$phase" = "features" ] || [ "$phase" = "polish" ] || [ "$phase" = "docs" ]; then
         git_checkpoint "cycle-${CYCLE}-${phase}"
     fi
 
@@ -957,6 +1058,18 @@ find "$OUTPUT_DIR" -type f | sort | while read -r f; do
     rel="${f#${OUTPUT_DIR}/}"
     echo "    ${rel}  (${size} bytes)"
 done
+echo ""
+if [ -d "${OUTPUT_DIR}/screenshots" ]; then
+    local ss_count
+    ss_count=$(find "${OUTPUT_DIR}/screenshots" -name '*.png' 2>/dev/null | wc -l)
+    echo "  Screenshots: ${ss_count} in ${OUTPUT_DIR}/screenshots/"
+fi
+if [ -f "${OUTPUT_DIR}/README.md" ]; then
+    echo "  README:      ${OUTPUT_DIR}/README.md"
+fi
+if [ -d "${OUTPUT_DIR}/docs" ]; then
+    echo "  Docs:        ${OUTPUT_DIR}/docs/"
+fi
 echo ""
 echo "  View: python3 -m http.server 8080 -d ${OUTPUT_DIR}"
 echo "  Logs: ${LOG_FILE}"
