@@ -64,20 +64,22 @@ flowchart TB
     end
 
     subgraph engine["Perpetual Iteration Engine<br/>(build-project.sh)"]
-        Health["Health Check<br/>playwright loads the app,<br/>checks for crashes"]
+        Health["Health Check<br/>playwright verifies the app<br/>actually works"]
         Select["Phase Selection<br/>picks fix / improve / refactor<br/>based on health + maturity"]
-        CC["Claude Code<br/>reads, writes, and runs code<br/>one focused task per cycle"]
+        OC["OpenClaw<br/>orchestrates sessions,<br/>manages tool access"]
         Vision["Vision Gate<br/>screenshots at 5 resolutions"]
 
         Health --> Select
-        Select --> CC
-        CC --> Health
-        CC -.->|"after polish"| Vision
-        Vision -.->|"feedback"| CC
+        Select --> OC
+        OC --> Health
+        OC -.->|"after polish"| Vision
+        Vision -.->|"feedback"| OC
     end
 
-    subgraph proxy["claude-code-proxy :8082"]
-        Trans["Anthropic API → OpenAI API"]
+    subgraph agents["Coding Agent"]
+        CC["Claude Code<br/>reads, writes, runs code"]
+        Proxy["claude-code-proxy :8082"]
+        CC --> Proxy
     end
 
     subgraph gpu["Local GPU (Ollama :11434)"]
@@ -86,21 +88,23 @@ flowchart TB
     end
 
     CLI --> Health
-    CC -->|"prompts"| Trans
-    Trans -->|"inference"| Coder
-    Vision -->|"screenshot + prompt"| VisionM
+    OC -->|"launches"| CC
+    Proxy -->|"inference"| Coder
+    Vision -->|"screenshot review"| VisionM
+    OC -.->|"direct API"| Coder
 
     style user fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style engine fill:#0d1b2a,stroke:#7c3aed,color:#e0e0e0,stroke-width:2px
-    style proxy fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style agents fill:#1b2838,stroke:#c4b5fd,color:#e0e0e0,stroke-width:2px
     style gpu fill:#1b2838,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 
     style CLI fill:#1a1a2e,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
     style Health fill:#064e3b,stroke:#34d399,color:#e0e0e0,stroke-width:2px
     style Select fill:#312e81,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
-    style CC fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
+    style OC fill:#7c3aed,stroke:#c4b5fd,color:#ffffff,stroke-width:2px
     style Vision fill:#0f3460,stroke:#00d4ff,color:#e0e0e0,stroke-width:2px
-    style Trans fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
+    style CC fill:#4c1d95,stroke:#a78bfa,color:#e0e0e0,stroke-width:2px
+    style Proxy fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
     style Coder fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
     style VisionM fill:#1e3a5f,stroke:#06b6d4,color:#e0e0e0,stroke-width:2px
 ```
