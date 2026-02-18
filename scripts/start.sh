@@ -34,6 +34,21 @@ banner
 echo -e "  ${DIM}Starting Ollama, proxy, and gateway. Loads ${OLLAMA_MODEL_NAME} into GPU memory.${RST}"
 echo ""
 
+# --- Memory warning (skip if remote mode) ---
+OLLAMA_URL=$(get_ollama_url)
+if [ "$OLLAMA_URL" = "http://localhost:11434" ]; then
+    HW_TIER=$(detect_hw_tier)
+    HW_AVAIL=$(detect_available_memory_gb)
+    if [ "$HW_TIER" = "insufficient" ] || [ "$HW_TIER" = "low" ]; then
+        log_warn "Available GPU memory: ${BOLD}${HW_AVAIL} GB${RST} — model may not fit."
+        log_info "Consider using remote mode: ${CYN}OLLAMA_HOST=http://<gpu-server>:11434 ./start${RST}"
+        echo ""
+        if ! ask_yn "Start anyway?" "n"; then
+            exit 0
+        fi
+    fi
+fi
+
 section "Starting Local AI Stack"
 
 ensure_stack
