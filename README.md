@@ -56,7 +56,7 @@ scripts/run-claude.sh           # Launch Claude Code (local)
 ```mermaid
 flowchart TB
     subgraph ui["User Interfaces"]
-        Browser["Dashboard\nlocalhost:18789"]
+        Browser["Control Panel\nlocalhost:18790"]
         CLI_OC["Terminal Agent\nscripts/run-openclaw.sh"]
         CLI_CC["Claude Code\nscripts/run-claude.sh"]
     end
@@ -210,9 +210,9 @@ tritium-coder/
 Run the built-in test suite to validate the full stack:
 
 ```bash
-tests/run-all.sh              # Run all tests (todo app, REST API, Tetris, Pong, Smash TV)
-tests/run-all.sh tetris       # Run one test
-tests/run-all.sh pong         # Run one test
+./test              # Run all tests (todo app, REST API, Tetris, Pong, Smash TV)
+./test tetris       # Run one test
+./test pong         # Run one test
 ```
 
 Each test sends a real coding job to the agent, waits for output, and validates the generated code.
@@ -222,9 +222,9 @@ Each test sends a real coding job to the agent, waits for output, and validates 
 | Problem | Fix |
 |---------|-----|
 | Slow responses | Close other memory-heavy apps. Qwen3-Coder-Next is 80B MoE (3B active), so it's fast. |
-| Dashboard "secure context" error | Access via `http://localhost:18789`, not an IP. For remote: `tailscale serve 18789` |
+| Dashboard "secure context" error | Access via `http://localhost:18789` (chat) or `:18790` (panel), not an IP. For remote: `tailscale serve 18789` |
 | Control panel blank | Run `./dashboard` — serves on `http://localhost:18790` |
-| Proxy won't start | `scripts/stop.sh && scripts/start.sh` |
+| Proxy won't start | `./stop && ./start` |
 | Node < 22 | `curl -fsSL https://deb.nodesource.com/setup_22.x \| sudo -E bash - && sudo apt install -y nodejs` |
 | Download interrupted | Re-run `./install.sh` — resumes automatically |
 
