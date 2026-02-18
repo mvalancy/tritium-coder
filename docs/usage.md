@@ -14,6 +14,7 @@
 openclaw dashboard        # Open OpenClaw chat dashboard
 scripts/run-claude.sh     # Launch Claude Code with local model (interactive terminal)
 scripts/run-openclaw.sh   # Launch OpenClaw agent (interactive terminal)
+./iterate "description"   # Build any project from a text description
 ./stop                    # Stop everything and free memory
 ./status                  # Check what's running
 ./test                    # Run test suite
@@ -440,6 +441,99 @@ watch -n 2 free -h                   # Memory usage
 1. Point the model at your codebase
 2. Ask it to generate README sections, API docs, or inline comments
 3. Use the direct API (Workflow 2) for batch doc generation across many files
+
+---
+
+## Workflow 5: Perpetual Iteration Engine (Build System)
+
+The build system is an autonomous loop that generates any project from a text description, then iteratively improves it. The vision: **perpetual motion** — AI builds, automated tests validate from a user's perspective, failures drive the next iteration, and the system self-improves.
+
+### Build a single project
+
+```bash
+./iterate "Build a Tetris game with HTML5 canvas" --hours 4
+./iterate "Create a REST API for a bookstore" --hours 2 --no-vision
+./iterate "Refactor the tritium-coder test suite" --dir . --hours 1
+```
+
+Options:
+- `--hours <n>` — time budget (default: 4)
+- `--name <name>` — project name (default: derived from description)
+- `--dir <path>` — output directory (default: `examples/<name>`)
+- `--no-vision` — skip vision model reviews
+- `--vision-model <m>` — vision model (default: `qwen3-vl:32b`)
+
+### Build all example projects
+
+```bash
+scripts/create-examples.sh        # 4 hours per project (default)
+scripts/create-examples.sh 2      # 2 hours per project
+```
+
+Edit `scripts/create-examples.sh` to add your own project descriptions.
+
+### The iteration cycle
+
+Each cycle:
+
+1. **Health check** — Playwright loads the app in a headless browser. Does it load? Render visible content? Respond to input? Survive 10 seconds? Any JS console errors?
+2. **Phase selection** — Based on health (PASS/WARN/FAIL), file sizes, and maturity tier (early/mid/late):
+   - App broken → **fix** (focused on the specific failure: blank screen, crash, dead controls)
+   - App has warnings → **fix**
+   - Files too large (>1500 lines) → **refactor** (split into modules)
+   - App works, early maturity → **improve** or **features** (one thing at a time, done well)
+   - App works, mid maturity → **polish**, **test**, **runtests**
+   - App works, late maturity → **consolidate** (remove dead code), **docs**
+3. **Code pass** — One focused prompt to the AI agent (ask for 1 thing, do it well)
+4. **Git checkpoint** — Auto-commit after constructive phases
+5. **Vision gate** — After polish/runtests, screenshots at 5 resolutions reviewed by vision model
+
+### Philosophy: zero-trust validation
+
+The system never trusts that code works because the AI said so.
+
+- **Health checks** verify from a real user's perspective: load the app, interact with it, check for crashes
+- **Prompts** emphasize user experience: "would a real person have a good experience?" not "does the code look correct?"
+- **Tests** are written as category nets catching classes of bugs (rendering failures, state corruption, dead input) — not individual bug checks
+- **Vision gate** reviews multi-resolution screenshots with a brutal QA lens
+
+### Output structure
+
+Each project built by the system maintains:
+
+```
+examples/tetris/
+  index.html           # The app
+  *.js, *.css           # Source files
+  test.html             # Test suite (uses lib/test-harness.js)
+  README.md             # Auto-generated with features and screenshots
+  screenshots/          # Captured at desktop, tablet, mobile, ultrawide
+  docs/                 # Architecture notes
+```
+
+### Shared test harness
+
+All generated projects use `lib/test-harness.js` — a lightweight browser test framework:
+
+```html
+<script src="../../lib/test-harness.js"></script>
+<script>
+  const t = new TritiumTest('My Game');
+  t.test('app initializes', () => { t.assertNoThrow(() => initGame()); });
+  t.test('visible content renders', () => { t.assertExists('canvas'); });
+  t.test('score is valid', () => { t.assertType(game.score, 'number'); });
+  t.run();
+</script>
+```
+
+### Monitoring a running build
+
+```bash
+tail -f logs/iterate-tetris.log     # Watch iteration progress
+./status                            # Check if services are running
+```
+
+The log shows every cycle: phase selected, health status, maturity tier, response length, git checkpoints, vision gate results.
 
 ---
 

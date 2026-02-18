@@ -220,6 +220,54 @@ flowchart LR
 
 See [docs/security.md](docs/security.md) for full details.
 
+## Build System — Perpetual Iteration Engine
+
+Tritium Coder includes an autonomous build system that generates, validates, and iteratively improves any project using the local AI stack. Give it a text description, walk away, and come back to a polished result.
+
+The vision: **perpetual motion**. AI builds code, automated tests verify it actually works from a user's perspective, failures drive the next iteration, and the system self-improves — indefinitely, within time limits you set. No human in the loop required.
+
+```bash
+./iterate "Build a Tetris game with HTML5 canvas" --hours 4
+```
+
+### How It Works
+
+The engine runs in a loop: **build → health check → fix → improve → test → repeat** — driven by real signals, not a fixed schedule.
+
+**Health Check System** — Every cycle, playwright loads the app in a headless browser and answers: Does it load? Does it render? Does it respond to input? Does it survive 10 seconds? How many JS console errors? The result (PASS/WARN/FAIL) drives what happens next.
+
+**Dynamic Phase Selection** — Instead of a fixed rotation, the engine picks the most useful phase based on health status, file sizes, and project maturity:
+- App broken → fix (always, no exceptions)
+- Files too large (>1500 lines) → refactor into modules
+- App works + early maturity → features
+- App works + late maturity → consolidate, polish, docs
+
+**Available Phases:** fix, improve, features, test, runtests, polish, refactor, consolidate, docs
+
+**Zero-Trust Validation** — The system never trusts that code works just because the AI said so. Every prompt emphasizes user-perspective validation: "Would a real person have a good experience?" Tests are written as category nets (rendering failures, state corruption, dead input) not individual bug checks.
+
+**Vision Gate** — After polish/test phases, screenshots at 5 resolutions (desktop, tablet, mobile, ultrawide) are reviewed by a vision model for layout bugs, rendering issues, and UX problems.
+
+**Per-Project Output:**
+```
+examples/tetris/
+  index.html           # The app
+  *.js, *.css           # Source files
+  test.html             # Test suite (uses lib/test-harness.js)
+  README.md             # Auto-generated docs with screenshots
+  screenshots/          # Captured at multiple resolutions
+  docs/                 # Architecture notes
+```
+
+### Batch Mode
+
+```bash
+scripts/create-examples.sh        # Build all example projects (tetris, pong, smashtv)
+scripts/create-examples.sh 2      # 2 hours per project instead of 4
+```
+
+Edit `scripts/create-examples.sh` to add your own project descriptions.
+
 ## File Structure
 
 ```
@@ -227,6 +275,7 @@ tritium-coder/
   install.sh              # One-click installer
   start, stop, status     # Top-level commands
   test                    # Run test suite
+  iterate                 # Build/iterate on any project (wraps build-project.sh)
   dashboard               # Open control panel
   CLAUDE.md               # Project context for Claude Code
   README.md               # This file
@@ -237,12 +286,17 @@ tritium-coder/
     status.sh             # Check what's running
     run-claude.sh         # Launch Claude Code
     run-openclaw.sh       # Launch OpenClaw agent
+    build-project.sh      # Core iteration engine (health checks, dynamic phases, vision gate)
+    create-examples.sh    # Batch builder for example projects
     lib/
       common.sh           # Shared bash library
+  lib/
+    test-harness.js       # Shared browser test framework (TritiumTest class)
   config/
     openclaw.json         # Hardened OpenClaw config
   web/
     index.html            # Control panel (service status, model info, quick actions)
+  examples/               # Generated projects (gitignored — built by create-examples.sh)
   tests/
     run-all.sh            # Test suite (Tetris, Pong, Smash TV, etc.)
   docs/
