@@ -142,6 +142,13 @@ if [ -f "$TRITIUM_LOG" ] && [ "$(wc -l < "$TRITIUM_LOG")" -gt 1000 ]; then
     mv "$TRITIUM_LOG.tmp" "$TRITIUM_LOG"
 fi
 
+# --- Load persistent env overrides (.tritium.env) ---
+TRITIUM_ENV="$PROJECT_DIR/.tritium.env"
+if [ -f "$TRITIUM_ENV" ]; then
+    # shellcheck source=/dev/null
+    source "$TRITIUM_ENV"
+fi
+
 # --- Timing helpers ---
 _timer_start=0
 timer_start() { _timer_start=$(date +%s); }
@@ -204,8 +211,9 @@ ollama_model_size() {
 }
 
 ollama_model_loaded() {
-    local ps
-    ps=$(curl_check http://localhost:11434/api/ps 2>/dev/null) || return 1
+    local ps ollama_url
+    ollama_url=$(get_ollama_url)
+    ps=$(curl_check "$ollama_url/api/ps" 2>/dev/null) || return 1
     echo "$ps" | grep -q "$1"
 }
 
@@ -215,23 +223,93 @@ port_listening() {
 }
 
 # =========================================================================
+#  Hardware detection functions
+# =========================================================================
+
+detect_ram_gb() {
+    free -g 2>/dev/null | awk '/^Mem:/ {print $2}'
+}
+
+detect_gpu_name() {
+    nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1
+}
+
+detect_vram_mb() {
+    local total=0
+    while IFS= read -r mb; do
+        # Skip non-numeric values (e.g. "N/A" on unified memory systems)
+        [[ "$mb" =~ ^[0-9]+$ ]] && total=$(( total + mb ))
+    done < <(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null)
+    echo "$total"
+}
+
+detect_unified_memory() {
+    local gpu
+    gpu=$(detect_gpu_name)
+    if echo "$gpu" | grep -qiE 'GB10|GB20|Jetson|Tegra|Grace'; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+detect_available_memory_gb() {
+    if [ "$(detect_unified_memory)" = "true" ]; then
+        detect_ram_gb
+    else
+        local vram_mb
+        vram_mb=$(detect_vram_mb)
+        echo $(( vram_mb / 1024 ))
+    fi
+}
+
+detect_hw_tier() {
+    local mem
+    mem=$(detect_available_memory_gb)
+    if [ "$mem" -ge 96 ] 2>/dev/null; then
+        echo "full"
+    elif [ "$mem" -ge 32 ] 2>/dev/null; then
+        echo "mid"
+    elif [ "$mem" -ge 16 ] 2>/dev/null; then
+        echo "low"
+    else
+        echo "insufficient"
+    fi
+}
+
+detect_disk_gb() {
+    df -BG "$PROJECT_DIR" 2>/dev/null | awk 'NR==2 {gsub(/G/,"",$4); print $4}'
+}
+
+get_ollama_url() {
+    echo "${OLLAMA_HOST:-http://localhost:11434}"
+}
+
+# =========================================================================
 #  Service ensure functions — idempotent, used by start.sh and dashboard.sh
 # =========================================================================
 
 ensure_ollama() {
-    if curl_check http://localhost:11434/api/tags &>/dev/null; then
-        log_ok "Ollama server"
+    local ollama_url
+    ollama_url=$(get_ollama_url)
+    if curl_check "$ollama_url/api/tags" &>/dev/null; then
+        log_ok "Ollama server ${DIM}(${ollama_url})${RST}"
         return 0
+    fi
+    # Remote mode: don't try to start locally
+    if [ "$ollama_url" != "http://localhost:11434" ]; then
+        log_fail "Remote Ollama at ${ollama_url} is not reachable"
+        return 1
     fi
     timer_start
     log_run "Starting Ollama server..."
     ensure_dir "$LOG_DIR"
     ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
     for _ in $(seq 1 15); do
-        curl_check http://localhost:11434/api/tags &>/dev/null && break
+        curl_check "$ollama_url/api/tags" &>/dev/null && break
         sleep 1
     done
-    if curl_check http://localhost:11434/api/tags &>/dev/null; then
+    if curl_check "$ollama_url/api/tags" &>/dev/null; then
         log_ok "Ollama server started ($(timer_elapsed)s)"
         return 0
     fi
