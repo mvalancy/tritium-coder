@@ -507,6 +507,8 @@ Requirements:
 - Must work by opening index.html in a browser — fully self-contained
 - Add sound effects using Web Audio API (synthesized, no audio files)
 
+If a CLAUDE.md file exists in the output directory, read it first for project context.
+
 Write ALL files now. Make sure the project works immediately.
 PROMPT
 }
