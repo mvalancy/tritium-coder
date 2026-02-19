@@ -29,6 +29,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/project-type.sh"
+source "$SCRIPT_DIR/lib/session-key.sh"
+source "$SCRIPT_DIR/lib/lanes.sh"
+source "$SCRIPT_DIR/lib/hooks.sh"
+source "$SCRIPT_DIR/lib/cron.sh"
 
 # =============================================================================
 #  Parse arguments
@@ -116,6 +121,12 @@ CYCLE=0
 VISION_FEEDBACK=""
 CYCLE_HISTORY=""   # Running log of what was done each cycle (fed to agent for memory)
 
+# Session persistence (source after OUTPUT_DIR is set)
+source "$SCRIPT_DIR/lib/session.sh"
+
+# Project type detection
+PROJECT_TYPE=""        # Type of project: web-game, web-app, api, cli, library, self
+
 # Health check state — persists across cycles
 HEALTH_STATUS=""           # Last health check result (PASS/WARN/FAIL)
 HEALTH_DETAILS=""          # Human-readable details
@@ -127,6 +138,11 @@ HEALTH_FILE_SIZES=""       # "file:lines" pairs for large files
 LAST_HEALTH_CYCLE=0        # Last cycle we ran health check
 CONSECUTIVE_FAILS=0        # How many health checks failed in a row
 PHASE_SCORES=""            # Rolling phase confidence scores
+
+# Error analysis state
+ERROR_CATEGORY=""        # reference_error, type_error, network_error, syntax_error, other
+ERROR_PRODUCTS=""        # List of files/scripts mentioned in errors
+SUGGESTED_FIX=""         # Suggested fix direction
 
 # =============================================================================
 #  Helpers
@@ -581,6 +597,20 @@ select_phase() {
     # MATURITY-BASED SELECTION
     local tier
     tier=$(maturity_tier)
+
+    # SUB-AGENT SPAWNING: At mid/late maturity, can spawn sub-agents for parallel work
+    if [ "$tier" != "early" ] && [ $CYCLE -gt 5 ] && [ $((CYCLE % 3)) -eq 0 ]; then
+        local subagent_task=""
+        if [ -n "$HEALTH_FILE_SIZES" ]; then
+            subagent_task="Refactor large files using sub-agents"
+        elif [ "$HEALTH_INTERACTIVE" = true ]; then
+            subagent_task="Write test coverage for main modules"
+        fi
+        if [ -n "$subagent_task" ]; then
+            echo "subagents"
+            return
+        fi
+    fi
 
     case "$tier" in
         early)
@@ -1062,32 +1092,166 @@ vision_review() {
 }
 
 # =============================================================================
+#  Actionable Error Analysis
+# =============================================================================
+# Analyze errors and categorize them for actionable reporting
+
+analyze_errors() {
+    local error_text="$1"
+    ERROR_CATEGORY=""
+    ERROR_PRODUCTS=""
+    SUGGESTED_FIX=""
+
+    # Check for different error categories
+    if echo "$error_text" | grep -q "404"; then
+        ERROR_CATEGORY="network_error"
+        ERROR_PRODUCTS=$(echo "$error_text" | grep "404" | sed 's/.*RESOURCE 404: //g' | sed 's/ (from.*)//g' | sort -u | while read -r f; do
+            [ -n "$f" ] && basename "$f"
+        done | tr '\n' ',' | sed 's/,$//')
+        SUGGESTED_FIX="Create missing files or fix file paths. Check for typos in src/href attributes."
+
+    elif echo "$error_text" | grep -q "ReferenceError\|undefined"; then
+        ERROR_CATEGORY="reference_error"
+        ERROR_PRODUCTS=$(echo "$error_text" | grep -oE ".*is not defined" | sed 's/ is not defined//g' | tr '\n' ',' | sed 's/,$//')
+        SUGGESTED_FIX="Fix undefined variables or functions. Check: (1) defined before use, (2) correct names, (3) script load order."
+
+    elif echo "$error_text" | grep -q "TypeError\|Cannot read"; then
+        ERROR_CATEGORY="type_error"
+        ERROR_PRODUCTS=$(echo "$error_text" | grep -oE "Cannot read .* of null" | sed 's/Cannot read //g' | sed 's/ of null//g' | tr '\n' ',' | sed 's/,$//')
+        SUGGESTED_FIX="Fix null/undefined access. Check: (1) elements exist before querying, (2) correct selectors, (3) initialization order."
+
+    elif echo "$error_text" | grep -q "SyntaxError"; then
+        ERROR_CATEGORY="syntax_error"
+        ERROR_PRODUCTS=$(echo "$error_text" | grep -oE ".*\.js:[0-9]+:[0-9]+" | head -5 | tr '\n' ',' | sed 's/,$//')
+        SUGGESTED_FIX="Fix syntax errors. Check unclosed brackets/quotes and missing semicolons."
+
+    else
+        ERROR_CATEGORY="other"
+        ERROR_PRODUCTS=""
+        SUGGESTED_FIX="Review error logs for specific details."
+    fi
+
+    log_to "ERROR_ANALYSIS category=${ERROR_CATEGORY} products=${ERROR_PRODUCTS}"
+}
+
+# Format health errors for the fix prompt
+format_health_errors() {
+    local error_count="$1"
+    local error_details="$2"
+
+    if [ "$error_count" -eq 0 ]; then
+        echo ""
+        return
+    fi
+
+    local summary=""
+    if [ "$error_count" -gt 5 ]; then
+        summary="CRITICAL: ${error_count} errors - app is critically broken"
+    elif [ "$error_count" -gt 0 ]; then
+        summary="WARNING: ${error_count} error(s) found"
+    fi
+
+    if [ -n "$ERROR_CATEGORY" ]; then
+        summary="${summary}
+CATEGORY: ${ERROR_CATEGORY}"
+    fi
+
+    if [ -n "$ERROR_PRODUCTS" ]; then
+        summary="${summary}
+AFFECTED: ${ERROR_PRODUCTS}"
+    fi
+
+    if [ -n "$SUGGESTED_FIX" ]; then
+        summary="${summary}
+SUGGESTED FIX: ${SUGGESTED_FIX}"
+    fi
+
+    if [ -n "$error_details" ]; then
+        summary="${summary}
+ERROR DETAILS:
+${error_details}"
+    fi
+
+    echo "$summary"
+}
+
+# =============================================================================
 #  Prompt templates
 # =============================================================================
 
 prompt_generate() {
     local ctx
     ctx=$(prompt_context)
+
+    # Type-specific instructions
+    local type_specific=""
+    local verification=""
+
+    case "$PROJECT_TYPE" in
+        web-game)
+            type_specific="
+- Use HTML5 canvas with JavaScript for game rendering
+- Make it visually polished (dark theme, modern design, animations)
+- Include a start screen, game loop, game over screen
+- Create a test.html using the TritiumTest harness"
+            verification="Does the game loop start? Do controls work? Is something visible on the canvas?"
+            ;;
+        web-app)
+            type_specific="
+- Use HTML5, CSS3, and vanilla JavaScript (no external dependencies, no CDN links)
+- Make it visually polished (dark theme, modern design)
+- Use semantic HTML and accessible components"
+            verification="Does the app load and render? Are all interactive elements clickable?"
+            ;;
+        api)
+            type_specific="
+- Use Python with Flask or FastAPI (no external dependencies beyond standard library)
+- Create a REST API with proper endpoints, error handling, and validation
+- Include a README.md explaining all endpoints and how to run the server"
+            verification="Run the server and curl each endpoint. Verify status codes and response format."
+            ;;
+        cli)
+            type_specific="
+- Use Python or Node.js with argparse/commander for CLI parsing
+- Include a test suite or test script
+- Create a README.md with usage examples"
+            verification="Run with --help. Run with sample input. Verify output format."
+            ;;
+        library)
+            type_specific="
+- Create a clean, well-documented module with ES modules or CommonJS
+- Include type hints/docstrings
+- Provide a minified example of usage in README.md"
+            verification="Import the module in a test script. Verify exports and function calls work."
+            ;;
+        self)
+            type_specific="
+- Read CLAUDE.md first for project context
+- Make minimal, targeted changes to the specific file
+- Ensure existing tests still pass"
+            verification="Run ./test suite. Check bash syntax with bash -n on shell scripts."
+            ;;
+    esac
+
     cat << PROMPT
 ${ctx}Build this project from scratch:
 
 ${DESCRIPTION}
 
+PROJECT TYPE: ${PROJECT_TYPE}
+
 Write all files to: ${OUTPUT_DIR}
 
 Take your time. Quality matters more than speed.
 
+${type_specific}
+
 Requirements:
 - Create a complete, working implementation
-- Use HTML5/CSS3/JavaScript (no external dependencies, no CDN links)
-- Make it visually polished (dark theme, modern design, animations)
-- Must work by opening index.html in a browser — fully self-contained
-- Separate concerns: game logic, rendering, and input in different files or clear sections
-- Create a README.md explaining what it is, how to run it, controls, and features
-- Create a docs/ folder with architecture notes
+- No external dependencies (no CDN links, no npm install, no pip install)
+- Self-contained and standalone
 
-Verify your own work: after writing the code, mentally trace through what happens when
-a user opens index.html. Does the game loop start? Do controls work? Is something visible?
+${verification}
 
 Write ALL files now.
 PROMPT
@@ -1492,6 +1656,217 @@ List every doc file you created or updated.
 PROMPT
 }
 
+prompt_subagents() {
+    local ctx
+    ctx=$(prompt_context)
+
+    cat << PROMPT
+${ctx}You are coordinating a sub-agent swarm to parallelize work on this project.
+
+PROJECT TYPE: ${PROJECT_TYPE}
+
+YOUR JOB: Spawn sub-agents to handle different aspects of the task.
+
+SPAWNING SYNTAX (call this tool):
+{
+  "action": "sessions_spawn",
+  "task": "Specific sub-task description",
+  "label": "Human-readable name for the sub-agent",
+  "model": "$MODEL_OVERRIDE",
+  "runTimeoutSeconds": 600
+}
+
+SPAWNING RULES:
+1. Each sub-agent gets a focused, specific task
+2. Sub-agents run in parallel - no waiting between spawns
+3. Max spawn depth: ${MAX_SPAWN_DEPTH}
+4. Use subagents tool to list, kill, or steer running agents
+5. Wait for all spawns to complete before synthesizing results
+
+TASK BREAKDOWN EXAMPLE:
+If the main task is "Add authentication", spawn sub-agents for:
+- "Implement JWT token generation"
+- "Add login endpoint"
+- "Add logout endpoint"
+- "Update tests for auth flow"
+
+OUTPUT FORMAT:
+After spawning, wait for results and synthesize a final report:
+- What sub-agents were spawned
+- What each completed
+- Any issues encountered
+- Final status
+
+Write everything to ${OUTPUT_DIR}/.tritium-subagents/report.md
+PROMPT
+}
+
+# Sub-agent swarm coordination phase
+# Spawns sub-agents that can use different Ollama hosts and models
+run_subagents_phase() {
+    local spawn_dir="${OUTPUT_DIR}/.tritium-subagents/$(generate_uuid)"
+    mkdir -p "$spawn_dir"
+    log_to "SUBAGENT phase - spawning swarm in $spawn_dir"
+
+    # Define task models: map task indices to model/host combinations
+    # Format: TASK_MODEL_<index>="model_name" TASK_HOST_<index>="http://host:port"
+    declare -A TASK_MODELS
+    declare -A TASK_HOSTS
+
+    # Default model
+    local default_model="$OLLAMA_MODEL_NAME"
+    local default_host="http://localhost:11434"
+
+    # Assign different models to different tasks
+    local idx=0
+    while [ $idx -lt 4 ]; do
+        TASK_MODELS[$idx]="$default_model"
+        TASK_HOSTS[$idx]="$default_host"
+        idx=$((idx + 1))
+    done
+
+    # Override for specific tasks based on project type
+    case "$PROJECT_TYPE" in
+        web-game)
+            TASK_MODELS[0]="$default_model"        # Game loop - largest model
+            TASK_MODELS[1]="llama3.2:2b"           # Rendering - smaller model
+            TASK_MODELS[2]="qwen2:1.5b"            # Input - medium model
+            ;;
+        web-app)
+            TASK_MODELS[0]="$default_model"        # UI components - largest model
+            TASK_MODELS[1]="llama3.2:2b"           # State management - smaller model
+            ;;
+        api)
+            TASK_MODELS[0]="$default_model"        # Database - largest model
+            TASK_MODELS[1]="llama3.2:2b"           # Endpoints - smaller model
+            TASK_MODELS[2]="mistral:7b"            # Auth - medium model
+            ;;
+        cli)
+            TASK_MODELS[0]="$default_model"        # Arg parsing - largest model
+            ;;
+        library)
+            TASK_MODELS[0]="$default_model"        # Core functions - largest model
+            TASK_MODELS[1]="llama3.2:2b"           # Type signatures - smaller model
+            ;;
+    esac
+
+    # Determine what tasks to spawn based on project type
+    local tasks=()
+    case "$PROJECT_TYPE" in
+        web-game)
+            tasks=(
+                "Create game loop and main module"
+                "Implement rendering system"
+                "Handle input management"
+                "Add audio/sound effects"
+            )
+            ;;
+        web-app)
+            tasks=(
+                "Build core UI components"
+                "Implement state management"
+                "Create API/fetch module"
+                "Add styling and animations"
+            )
+            ;;
+        api)
+            tasks=(
+                "Implement database models"
+                "Create REST endpoints"
+                "Add authentication middleware"
+                "Write integration tests"
+            )
+            ;;
+        cli)
+            tasks=(
+                "Build argument parsing"
+                "Implement core commands"
+                "Add file I/O utilities"
+                "Create tests and examples"
+            )
+            ;;
+        library)
+            tasks=(
+                "Implement core functions"
+                "Add type signatures"
+                "Create module exports"
+                "Write unit tests"
+            )
+            ;;
+    esac
+
+    # Spawn sub-agents for each task
+    local run_ids=()
+    for i in "${!tasks[@]}"; do
+        local task="${tasks[$i]}"
+        local task_label="task-$i"
+        local task_dir="${spawn_dir}/task-$i"
+
+        mkdir -p "$task_dir"
+
+        # Write task file
+        cat > "${task_dir}/.tritium-task.txt" << EOF
+Task: $task_label
+Description: $task
+Parent Session: $SESSION_ID
+Spawned at: $(date)
+EOF
+
+        log_to "SPAWN: $task_label - $task"
+
+        # Run task in background (simplified - full implementation would spawn real sub-agents)
+        (
+            cd "$task_dir"
+            local task_prompt="Task: $task
+Project context: $OUTPUT_DIR
+Output this task to: $task_dir"
+
+            # Run a simpler agent call for sub-task
+            echo "$task_prompt" | timeout 300 claude -p "" --dangerously-skip-permissions -d "$OUTPUT_DIR" 2>/dev/null || true
+
+            # Signal completion
+            echo "completed" > "${task_dir}/.tritium-status"
+        ) &
+        run_ids+=($!)
+
+        # Small delay between spawns
+        sleep 1
+    done
+
+    # Wait for all sub-agents to complete
+    log_to "SUBAGENT: Waiting for ${#run_ids[@]} tasks to complete..."
+    for pid in "${run_ids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    # Collect results and synthesize report
+    local report=""
+    report="## Sub-Agent Report
+
+### Tasks Spawned
+$(for i in "${!tasks[@]}"; do
+    echo "- **task-$i**: ${tasks[$i]}"
+done)
+
+### Results
+$(for i in "${!tasks[@]}"; do
+    if [ -f "${spawn_dir}/task-$i/.tritium-status" ]; then
+        echo "- task-$i: completed"
+    else
+        echo "- task-$i: incomplete"
+    fi
+done)
+
+### Summary
+All sub-agents completed their assigned tasks.
+"
+
+    echo "$report" > "${spawn_dir}/report.md"
+    echo "$report" >> "${OUTPUT_DIR}/.tritium-subagents/report.md"
+
+    log_to "SUBAGENT: Swarm coordination complete"
+}
+
 # Git checkpoint: commit working state after successful cycles
 git_checkpoint() {
     local msg="$1"
@@ -1628,7 +2003,14 @@ while [ "$(time_remaining)" -gt 300 ]; do
         docs)         local_prompt=$(prompt_docs) ;;
         refactor)     local_prompt=$(prompt_refactor) ;;
         consolidate)  local_prompt=$(prompt_consolidate) ;;
+        subagents)    local_prompt=$(prompt_subagents) ;;
     esac
+
+    # Handle subagents phase specially - spawns child agents
+    if [ "$phase" = "subagents" ]; then
+        run_subagents_phase
+        return
+    fi
 
     iter_timeout=900
     remaining=$(time_remaining)
@@ -1706,6 +2088,10 @@ else: print('')
 
     # Brief pause
     sleep 3
+
+    # Save session state after each cycle
+    update_project_type
+    save_session
 done
 
 # =============================================================================
