@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "created": "2026-02-17",
+  "description": "Security policy configuration for Tritium Coder",
+  "allow": [
+    "read",
+    "write",
+    "bash",
+    "glob",
+    "grep",
+    "http_get",
+    "http_post"
+  ],
+  "deny_commands": [
+    "sudo",
+    "rm -rf /",
+    "rm -rf /*",
+    "curl *.exe",
+    "wget *.exe",
+    "curl http://*.exe",
+    "wget http://*.exe",
+    "apt-get install",
+    "pip install --upgrade pip",
+    "chmod 777"
+  ],
+  "restrict_paths": {
+    "write": [
+      "$OUTPUT_DIR",
+      "/tmp/tritium-*",
+      "$PROJECT_DIR/logs"
+    ],
+    "read": [
+      "$OUTPUT_DIR",
+      "$PROJECT_DIR",
+      "/tmp",
+      "$PROJECT_DIR/.proxy"
+    ]
+  },
+  "max_file_size_bytes": 1048576,
+  "max_command_timeout_secs": 300,
+  "max_concurrent_commands": 3,
+  "audit_logging": true,
+  "audit_log_path": "$PROJECT_DIR/logs/tritium-audit.jsonl",
+  "session_tracking": true,
+  "security_mode": "audit"
+}
